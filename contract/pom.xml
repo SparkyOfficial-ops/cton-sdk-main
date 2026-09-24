@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 
+                             http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.cton</groupId>
+        <artifactId>cton-sdk-parent</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>ton-sdk-contract</artifactId>
+    <packaging>jar</packaging>
+
+    <name>CTON-SDK Contract</name>
+    <description>High-level abstractions for smart contracts</description>
+
+    <dependencies>
+        <!-- Core SDK dependency -->
+        <dependency>
+            <groupId>com.cton</groupId>
+            <artifactId>cton-sdk</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        
+        <!-- API Client dependency -->
+        <dependency>
+            <groupId>com.cton</groupId>
+            <artifactId>ton-sdk-api-client</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+        </dependency>
+        
+        <!-- JSON processing -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+        
+        <!-- JUnit for testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.9.2</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Mockito for mocking in tests -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.7.0</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <configuration>
+                    <mainClass>com.cton.contract.example.AdvancedContractExample</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

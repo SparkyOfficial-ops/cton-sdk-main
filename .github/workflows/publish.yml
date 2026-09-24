@@ -1,0 +1,360 @@
+name: Build and Publish cton-sdk
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, master ]
+  release:
+    types: [ created ]
+
+# Set permissions for GitHub token
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+      
+    - name: Setup CMake
+      uses: jwlawson/actions-setup-cmake@v1.14
+      with:
+        cmake-version: '3.22.x'
+        
+    - name: Setup vcpkg
+      run: |
+        # Always ensure vcpkg is properly set up
+        if (!(Test-Path "vcpkg\.git")) {
+          # If vcpkg directory doesn't contain git metadata, clone it
+          if (Test-Path "vcpkg") {
+            Remove-Item -Recurse -Force vcpkg
+          }
+          git clone https://github.com/Microsoft/vcpkg.git
+        }
+        cd vcpkg
+        # Bootstrap vcpkg if not already done
+        if (!(Test-Path "vcpkg.exe")) {
+          Write-Host "Bootstrapping vcpkg..."
+          cmd /c ".\bootstrap-vcpkg.bat"
+        } else {
+          Write-Host "vcpkg already bootstrapped"
+        }
+        # Verify the toolchain file exists
+        $toolchainPath = "scripts\buildsystems\vcpkg.cmake"
+        if (!(Test-Path $toolchainPath)) {
+          Write-Error "vcpkg.cmake not found at $toolchainPath"
+          exit 1
+        }
+        Write-Host "vcpkg toolchain file found at: $((Get-Item $toolchainPath).FullName)"
+        cd ..
+        
+    - name: Install OpenSSL via vcpkg
+      run: |
+        cd vcpkg
+        Write-Host "Installing OpenSSL..."
+        cmd /c ".\vcpkg install openssl:x64-windows"
+        Write-Host "OpenSSL installation completed"
+        # List installed packages for debugging
+        cmd /c ".\vcpkg list"
+        cd ..
+        
+    - name: Build C++ Core
+      run: |
+        mkdir cpp\build
+        cd cpp\build
+        # Use absolute path for vcpkg toolchain to avoid path issues in CI
+        $VCPKG_PATH = Join-Path $env:GITHUB_WORKSPACE "vcpkg\scripts\buildsystems\vcpkg.cmake"
+        # Verify the toolchain file exists before using it
+        if (!(Test-Path $VCPKG_PATH)) {
+          Write-Error "vcpkg toolchain file not found at $VCPKG_PATH"
+          # List contents of vcpkg directory for debugging
+          Get-ChildItem -Recurse ..\..\vcpkg\scripts\buildsystems
+          exit 1
+        }
+        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$VCPKG_PATH" -DVCPKG_TARGET_TRIPLET=x64-windows
+        cmake --build . --config Release
+        
+    - name: Copy DLL to resources
+      run: |
+        # Ensure destination directories exist
+        $resourcesDir = "java\src\main\resources"
+        $winResourcesDir = "java\src\main\resources\win32-x86-64"
+        
+        if (!(Test-Path $resourcesDir)) {
+          New-Item -ItemType Directory -Path $resourcesDir -Force
+        }
+        if (!(Test-Path $winResourcesDir)) {
+          New-Item -ItemType Directory -Path $winResourcesDir -Force
+        }
+        
+        # Check for the library in different possible locations
+        $LIB_FILE = $null
+        if (Test-Path cpp\build\Release\cton-sdk-core.dll) {
+          $LIB_FILE="cpp\build\Release\cton-sdk-core.dll"
+        } elseif (Test-Path cpp\build\cton-sdk-core.dll) {
+          $LIB_FILE="cpp\build\cton-sdk-core.dll"
+        } elseif (Test-Path cpp\build\Debug\cton-sdk-core.dll) {
+          $LIB_FILE="cpp\build\Debug\cton-sdk-core.dll"
+        } else {
+          Write-Host "DLL not found, checking in build directory"
+          Get-ChildItem cpp\build\ -Recurse -Filter "*.dll" -ErrorAction SilentlyContinue
+          exit 1
+        }
+        
+        Write-Host "Copying $LIB_FILE to resources directories"
+        Copy-Item $LIB_FILE $resourcesDir\
+        Copy-Item $LIB_FILE $winResourcesDir\
+        
+        # Copy OpenSSL DLLs required by the native library
+        $vcpkgBinDir = "vcpkg\installed\x64-windows\bin"
+        Write-Host "Checking for OpenSSL DLLs in $vcpkgBinDir"
+        if (Test-Path $vcpkgBinDir) {
+          Write-Host "Found vcpkg bin directory, copying OpenSSL DLLs"
+          Get-ChildItem $vcpkgBinDir\*.dll | ForEach-Object {
+            Write-Host "Copying $($_.Name)"
+            Copy-Item $_.FullName $resourcesDir\ -ErrorAction SilentlyContinue
+          }
+        } else {
+          Write-Host "vcpkg bin directory not found, checking alternative locations"
+          # List vcpkg structure for debugging
+          Get-ChildItem -Recurse vcpkg\installed -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host $_.FullName
+          }
+        }
+        
+        # List contents of resources directory for debugging
+        Write-Host "Contents of resources directory:"
+        Get-ChildItem $resourcesDir -ErrorAction SilentlyContinue | ForEach-Object {
+          Write-Host $_.Name
+        }
+        
+    - name: Build Java Components
+      run: |
+        cd java
+        mvn clean install
+        
+    - name: Run Tests
+      run: |
+        cd java
+        # Set JNA library path to point to the resources directory where the DLL is located
+        $env:JNA_LIBRARY_PATH = "..\src\main\resources"
+        Write-Host "JNA_LIBRARY_PATH set to: $env:JNA_LIBRARY_PATH"
+        # List contents of resources directory for debugging
+        Write-Host "Contents of resources directory:"
+        Get-ChildItem "..\src\main\resources" -ErrorAction SilentlyContinue | ForEach-Object {
+          Write-Host $_.Name
+        }
+        mvn test "-Djna.library.path=..\src\main\resources"
+        
+    - name: Upload JAR Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cton-sdk-jar
+        path: java/target/cton-sdk-*.jar
+        
+    - name: Upload DLL Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cton-sdk-dll
+        path: |
+          cpp/build/Release/cton-sdk-core.dll
+          cpp/build/cton-sdk-core.dll
+          cpp/build/Debug/cton-sdk-core.dll
+          
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+        
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential libssl-dev
+        
+    - name: Setup vcpkg
+      run: |
+        # Always ensure vcpkg is properly set up
+        if [ ! -d "vcpkg/.git" ]; then
+          # If vcpkg directory doesn't contain git metadata, clone it
+          if [ -d "vcpkg" ]; then
+            rm -rf vcpkg
+          fi
+          git clone https://github.com/Microsoft/vcpkg.git
+        fi
+        cd vcpkg
+        # Bootstrap vcpkg if not already done
+        if [ ! -f "./vcpkg" ]; then
+          ./bootstrap-vcpkg.sh
+        fi
+        # Verify the toolchain file exists
+        if [ ! -f "scripts/buildsystems/vcpkg.cmake" ]; then
+          echo "vcpkg.cmake not found in scripts/buildsystems/"
+          exit 1
+        fi
+        echo "vcpkg toolchain file found at: $(pwd)/scripts/buildsystems/vcpkg.cmake"
+        cd ..
+        
+    - name: Install OpenSSL via vcpkg
+      run: |
+        cd vcpkg
+        ./vcpkg install openssl:x64-linux
+        cd ..
+        
+    - name: Build C++ Core
+      run: |
+        mkdir cpp/build
+        cd cpp/build
+        # Use absolute path for vcpkg toolchain to avoid path issues in CI
+        VCPKG_PATH="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"
+        # Verify the toolchain file exists before using it
+        if [ ! -f "$VCPKG_PATH" ]; then
+          echo "vcpkg toolchain file not found at $VCPKG_PATH"
+          # List contents of vcpkg directory for debugging
+          ls -la ../../vcpkg/scripts/buildsystems/
+          exit 1
+        fi
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$VCPKG_PATH" -DVCPKG_TARGET_TRIPLET=x64-linux
+        cmake --build . --config Release
+        
+    - name: Copy SO to resources
+      run: |
+        # Ensure destination directories exist
+        mkdir -p java/src/main/resources/
+        mkdir -p java/src/main/resources/linux-x86-64/
+        
+        # Check for the library in different possible locations
+        if [ -f cpp/build/libcton-sdk-core.so ]; then
+          LIB_FILE=cpp/build/libcton-sdk-core.so
+        elif [ -f cpp/build/cton-sdk-core.so ]; then
+          LIB_FILE=cpp/build/cton-sdk-core.so
+        else
+          echo "SO file not found, checking build directory"
+          ls -la cpp/build/
+          find cpp/build/ -name "*.so" 2>/dev/null || echo "No .so files found"
+          exit 1
+        fi
+        
+        cp $LIB_FILE java/src/main/resources/
+        cp $LIB_FILE java/src/main/resources/linux-x86-64/
+        
+    - name: Build Java Components
+      run: |
+        cd java
+        mvn clean install
+        
+    - name: Run Tests
+      run: |
+        cd java
+        # Set JNA library path to point to the resources directory where the SO is located
+        export JNA_LIBRARY_PATH="../src/main/resources"
+        mvn test "-Djna.library.path=../src/main/resources"
+        
+    - name: Upload JAR Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cton-sdk-jar-linux
+        path: java/target/cton-sdk-*.jar
+        
+    - name: Upload SO Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: cton-sdk-so
+        path: |
+          cpp/build/libcton-sdk-core.so
+          cpp/build/cton-sdk-core.so
+    - name: Create Release Assets
+      run: |
+        # Create artifacts directory
+        mkdir -p artifacts
+        cd artifacts
+        
+        # Create platform-specific packages
+        # Find the actual library files - Windows
+        WINDOWS_LIB=""
+        if [ -f "../cpp/build/Release/cton-sdk-core.dll" ]; then
+          WINDOWS_LIB="../cpp/build/Release/cton-sdk-core.dll"
+        elif [ -f "../cpp/build/cton-sdk-core.dll" ]; then
+          WINDOWS_LIB="../cpp/build/cton-sdk-core.dll"
+        elif [ -f "../cpp/build/Debug/cton-sdk-core.dll" ]; then
+          WINDOWS_LIB="../cpp/build/Debug/cton-sdk-core.dll"
+        fi
+        
+        # Find the actual library files - Linux
+        LINUX_LIB=""
+        if [ -f "../cpp/build/libcton-sdk-core.so" ]; then
+          LINUX_LIB="../cpp/build/libcton-sdk-core.so"
+        elif [ -f "../cpp/build/cton-sdk-core.so" ]; then
+          LINUX_LIB="../cpp/build/cton-sdk-core.so"
+        fi
+        
+        # Check if we found the libraries
+        if [ -z "$WINDOWS_LIB" ]; then
+          echo "Windows DLL not found, listing build directory:"
+          ls -la ../cpp/build/
+          ls -la ../cpp/build/Release/ 2>/dev/null || echo "Release directory not found"
+          ls -la ../cpp/build/Debug/ 2>/dev/null || echo "Debug directory not found"
+          find ../cpp/build/ -name "*.dll" 2>/dev/null || echo "No .dll files found"
+          exit 1
+        fi
+        
+        if [ -z "$LINUX_LIB" ]; then
+          echo "Linux SO not found, listing build directory:"
+          ls -la ../cpp/build/
+          find ../cpp/build/ -name "*.so" 2>/dev/null || echo "No .so files found"
+          exit 1
+        fi
+        
+        # Create zip with the actual library files
+        mkdir -p temp/windows
+        mkdir -p temp/linux
+        cp "$WINDOWS_LIB" temp/windows/
+        cp "$LINUX_LIB" temp/linux/
+        zip -r cton-sdk-windows.zip temp/windows/
+        tar -czf cton-sdk-linux.tar.gz temp/linux/
+        
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/v')
+      with:
+        files: |
+          artifacts/cton-sdk-windows.zip
+          artifacts/cton-sdk-linux.tar.gz
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+  deploy-website:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./website
+        publish_branch: gh-pages
+        user_name: github-actions[bot]
+        user_email: github-actions[bot]@users.noreply.github.com
+        force_orphan: true

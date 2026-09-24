@@ -1,0 +1,45 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Force batch scripts to have CRLF line endings
+*.bat text eol=crlf
+
+# Force shell scripts to have LF line endings
+*.sh text eol=lf
+
+# Force C/C++ source files to have LF line endings
+*.c text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+
+# Force Java files to have LF line endings
+*.java text eol=lf
+
+# Force XML files to have LF line endings
+*.xml text eol=lf
+
+# Force JSON files to have LF line endings
+*.json text eol=lf
+
+# Force Markdown files to have LF line endings
+*.md text eol=lf
+
+# Force text files to have LF line endings
+*.txt text eol=lf
+
+# Binary files should not be modified
+*.dll binary
+*.exe binary
+*.so binary
+*.dylib binary
+*.lib binary
+*.a binary
+*.jar binary
+*.class binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
