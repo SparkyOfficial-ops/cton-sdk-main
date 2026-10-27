@@ -60,6 +60,8 @@ Makefile
 *.dll
 *.so
 *.dylib
+# JNA extracts this from the JAR (classpath resource win32-x86-64/cton-sdk-core.dll)
+!java/src/main/resources/win32-x86-64/cton-sdk-core.dll
 
 # Log files
 *.log

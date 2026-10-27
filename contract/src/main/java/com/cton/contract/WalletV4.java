@@ -47,9 +47,13 @@ public class WalletV4 extends BaseWallet {
      */
     @Override
     protected void storeOutgoingAction(CellBuilder builder, int sendMode, Cell orderMessage) {
+        storeOutgoingActions(builder, new int[] { sendMode }, java.util.Collections.singletonList(orderMessage));
+    }
+
+    @Override
+    protected void storeOutgoingActions(CellBuilder builder, int[] sendModes, java.util.List<Cell> orderMessages) {
         builder.storeUInt(8, 0);
-        builder.storeUInt(8, sendMode);
-        builder.storeRef(orderMessage);
+        super.storeOutgoingActions(builder, sendModes, orderMessages);
     }
 
     @Override

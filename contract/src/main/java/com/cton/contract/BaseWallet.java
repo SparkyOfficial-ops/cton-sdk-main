@@ -7,7 +7,9 @@ package com.cton.contract;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
 
 import com.cton.api.TonApiClient;
 import com.cton.sdk.Address;
@@ -139,9 +141,47 @@ public abstract class BaseWallet implements Wallet {
         b.storeCoins(BigInteger.ZERO); // fwd_fee
         b.storeUInt(64, 0);         // created_lt
         b.storeUInt(32, 0);         // created_at
-        b.storeBit(false);          // init = Nothing (не ініціалізуємо контракт)
-        b.storeBit(false);          // body = ^Cell (за посиланням)
-        b.storeRef(body);
+        b.storeBit(false);          // init = Nothing
+        if (body == null) {
+            b.storeBit(false);      // body = Nothing
+        } else {
+            b.storeBit(true);       // body = ^Cell
+            b.storeRef(body);
+        }
+        return b.build();
+    }
+
+    /**
+     * Внутрішнє повідомлення з необов'язковим StateInit за посиланням.
+     */
+    protected Cell buildInternalMessage(Address destination, BigInteger amount, Cell body,
+                                        boolean bounce, Cell stateInit) {
+        CellBuilder b = new CellBuilder();
+        b.storeBit(false);
+        b.storeBit(true);
+        b.storeBit(bounce);
+        b.storeBit(false);
+        b.storeUInt(2, 0);
+        b.storeAddress(destination);
+        b.storeCoins(amount);
+        b.storeBit(false);
+        b.storeCoins(BigInteger.ZERO);
+        b.storeCoins(BigInteger.ZERO);
+        b.storeUInt(64, 0);
+        b.storeUInt(32, 0);
+        if (stateInit == null) {
+            b.storeBit(false);
+        } else {
+            b.storeBit(true);
+            b.storeBit(true);
+            b.storeRef(stateInit);
+        }
+        if (body == null) {
+            b.storeBit(false);
+        } else {
+            b.storeBit(true);
+            b.storeRef(body);
+        }
         return b.build();
     }
     
@@ -311,20 +351,53 @@ public abstract class BaseWallet implements Wallet {
     }
 
     /**
+     * Підписати кілька внутрішніх повідомлень одним external-in і надіслати BOC у мережу.
+     * @return BOC зовнішнього повідомлення у Base64
+     */
+    public String sendTransfers(List<OutgoingTransfer> transfers, Crypto.PrivateKey privateKey,
+                                Long validUntil) throws IOException {
+        if (transfers == null || transfers.isEmpty() || transfers.size() > 4) {
+            throw new IOException("Wallet external message accepts from 1 to 4 internal messages");
+        }
+        List<Cell> orders = new ArrayList<>(transfers.size());
+        int[] modes = new int[transfers.size()];
+        for (int i = 0; i < transfers.size(); i++) {
+            OutgoingTransfer transfer = transfers.get(i);
+            orders.add(buildInternalMessage(
+                transfer.destination, transfer.amount, transfer.body, transfer.bounce, transfer.stateInit));
+            modes[i] = transfer.sendMode;
+        }
+        return signAndSend(orders, modes, privateKey, validUntil == null ? getValidUntil() : validUntil);
+    }
+
+    /**
      * Підписати ордер ключем гаманця і надіслати external-in на адресу цього гаманця.
      * Підпис — Ed25519 над representation hash тіла, а не над BOC пейлоада контракту.
      */
     private void sendSignedOrder(Cell orderMessage, int sendMode, Crypto.PrivateKey privateKey) throws IOException {
+        signAndSend(java.util.Collections.singletonList(orderMessage), new int[] { sendMode },
+            privateKey, getValidUntil());
+    }
+
+    private String signAndSend(List<Cell> orders, int[] sendModes, Crypto.PrivateKey privateKey,
+                               long validUntil) throws IOException {
         if (privateKey == null) {
             throw new IOException("Private key is required to sign the wallet message");
         }
-        long seqno = getSeqno();
+        long seqno = seqnoForSigning();
+        if (seqno == 0 && orders.size() > 2) {
+            throw new IOException("The first wallet transaction carries StateInit and at most 2 messages");
+        }
         long subwalletId = getSubwalletIdAsLong();
-        long validUntil = getValidUntil();
-        Cell signingBody = buildWalletBody(subwalletId, validUntil, seqno, sendMode, orderMessage);
+        Cell signingBody = buildWalletBody(subwalletId, validUntil, seqno, sendModes, orders);
         byte[] signature = Crypto.sign(privateKey, signingBody.representationHash());
-        Cell externalMessage = buildExternalMessage(signature, subwalletId, validUntil, seqno, sendMode, orderMessage);
-        sendTransaction(externalMessage);
+        Cell externalMessage = buildExternalMessage(
+            signature, subwalletId, validUntil, seqno, sendModes, orders, privateKey);
+        Boc boc = new Boc(externalMessage);
+        byte[] bocBytes = boc.serialize(true, true);
+        boc.close();
+        apiClient.sendBoc(bocBytes);
+        return Base64.getEncoder().encodeToString(bocBytes);
     }
     
     /**
@@ -345,13 +418,33 @@ public abstract class BaseWallet implements Wallet {
         return b.build();
     }
 
+    protected Cell buildWalletBody(long subwalletId, long validUntil, long seqno,
+                                   int[] sendModes, List<Cell> orderMessages) {
+        CellBuilder b = new CellBuilder();
+        b.storeUInt(32, subwalletId);
+        b.storeUInt(32, validUntil);
+        b.storeUInt(32, seqno);
+        storeOutgoingActions(b, sendModes, orderMessages);
+        return b.build();
+    }
+
     /**
      * Дія гаманця після seqno. V3 пише send_mode і референс на внутрішнє повідомлення.
      * Wallet V4 перевизначає цей метод і додає opcode 0.
      */
     protected void storeOutgoingAction(CellBuilder builder, int sendMode, Cell orderMessage) {
-        builder.storeUInt(8, sendMode);
-        builder.storeRef(orderMessage);
+        storeOutgoingActions(builder, new int[] { sendMode }, java.util.Collections.singletonList(orderMessage));
+    }
+
+    /**
+     * Кілька внутрішніх повідомлень. V4 перед списком пише opcode 0.
+     * У комірці не більше чотирьох посилань.
+     */
+    protected void storeOutgoingActions(CellBuilder builder, int[] sendModes, List<Cell> orderMessages) {
+        for (int i = 0; i < orderMessages.size(); i++) {
+            builder.storeUInt(8, sendModes[i]);
+            builder.storeRef(orderMessages.get(i));
+        }
     }
     
     /**
@@ -364,24 +457,63 @@ public abstract class BaseWallet implements Wallet {
     }
     
     /**
-     * Зовнішнє in-повідомлення для контракту гаманця (ext_in_msg_info$10) з inline-тілом,
-     * що складається з підпису (512 біт) та тіла транзакції (subwallet+valid_until+seqno+ref).
+     * Зовнішнє in-повідомлення (ext_in_msg_info$10).
+     * Якщо seqno == 0, до init:(Maybe (Either StateInit ^StateInit)) пишеться inline StateInit
+     * гаманця V3R2 або V4R2, інакше Maybe = Nothing.
      */
     private Cell buildExternalMessage(byte[] signature, long subwalletId, long validUntil, long seqno,
-                                      int sendMode, Cell orderMessage) {
+                                      int[] sendModes, List<Cell> orderMessages, Crypto.PrivateKey privateKey) throws IOException {
         CellBuilder b = new CellBuilder();
         b.storeUInt(2, 2);                 // ext_in_msg_info$10
         b.storeUInt(2, 0);                 // src = addr_none
         b.storeAddress(this.address);      // dst = адреса гаманця, не контракту жетона
         b.storeCoins(BigInteger.ZERO);     // import_fee = 0
-        b.storeBit(false);                 // state_init = Nothing
+        if (seqno == 0) {
+            int version = getVersion();
+            if (version != 3 && version != 4) {
+                throw new IOException("First transaction StateInit is implemented for Wallet V3R2 and V4R2");
+            }
+            Crypto.PublicKey publicKey = privateKey.getPublicKey();
+            try {
+                StateInit init = StateInit.forWallet(version, subwalletId, publicKey.getData());
+                b.storeBit(true);          // Maybe = Just
+                b.storeBit(false);         // Either = Left, StateInit inline
+                init.store(b);
+            } finally {
+                publicKey.close();
+            }
+        } else {
+            b.storeBit(false);             // Maybe = Nothing
+        }
         b.storeBit(false);                 // body = Either left (inline)
         b.storeBytes(signature);           // signature (512 біт)
         b.storeUInt(32, subwalletId);      // subwallet_id
         b.storeUInt(32, validUntil);       // valid_until
         b.storeUInt(32, seqno);            // seqno
-        storeOutgoingAction(b, sendMode, orderMessage);
+        storeOutgoingActions(b, sendModes, orderMessages);
         return b.build();
+    }
+
+    /**
+     * Нерозгорнутий рахунок не має методу seqno. Для першої транзакції це seqno 0.
+     */
+    private long seqnoForSigning() throws IOException {
+        if (!isAccountActive()) {
+            return 0;
+        }
+        return getSeqno();
+    }
+
+    private boolean isAccountActive() throws IOException {
+        JsonObject info = apiClient.getAddressInformation(address.toRaw());
+        if (!info.has("result") || !info.get("result").isJsonObject()) {
+            return false;
+        }
+        JsonObject result = info.getAsJsonObject("result");
+        if (!result.has("state") || result.get("state").isJsonNull()) {
+            return false;
+        }
+        return "active".equals(result.get("state").getAsString());
     }
     
     private long getSubwalletIdAsLong() {

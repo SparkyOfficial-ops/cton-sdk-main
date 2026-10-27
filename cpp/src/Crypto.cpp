@@ -16,8 +16,9 @@
     // OpenSSL implementation
     #include <openssl/evp.h>
     #include <openssl/err.h>
-    #include <openssl/ec.h>
-    #include <openssl/ecdsa.h>
+    #include <openssl/core_names.h>
+    #include <openssl/params.h>
+    #include <openssl/bn.h>
     #include <openssl/rand.h>
     
     // Debug output to check if OpenSSL is available
@@ -32,6 +33,172 @@
             return std::string(buffer);
         }
         return "Unknown OpenSSL error";
+    }
+
+    static EVP_PKEY* secp256k1FromPrivate(const uint8_t* key, size_t length) {
+        if (!key || length != 32) {
+            return nullptr;
+        }
+        unsigned char priv[32];
+        std::memcpy(priv, key, 32);
+        char group[] = "secp256k1";
+        OSSL_PARAM params[] = {
+            OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, group, 0),
+            OSSL_PARAM_construct_BN(OSSL_PKEY_PARAM_PRIV_KEY, priv, sizeof(priv)),
+            OSSL_PARAM_construct_end()
+        };
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
+        if (!ctx || EVP_PKEY_fromdata_init(ctx) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            return nullptr;
+        }
+        EVP_PKEY* pkey = nullptr;
+        if (EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            return nullptr;
+        }
+        EVP_PKEY_CTX_free(ctx);
+        return pkey;
+    }
+
+    static EVP_PKEY* secp256k1FromPublic(const uint8_t* key, size_t length) {
+        if (!key || (length != 33 && length != 65)) {
+            return nullptr;
+        }
+        std::vector<uint8_t> point(key, key + length);
+        char group[] = "secp256k1";
+        OSSL_PARAM params[] = {
+            OSSL_PARAM_construct_utf8_string(OSSL_PKEY_PARAM_GROUP_NAME, group, 0),
+            OSSL_PARAM_construct_octet_string(OSSL_PKEY_PARAM_PUB_KEY, point.data(), point.size()),
+            OSSL_PARAM_construct_end()
+        };
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr);
+        if (!ctx || EVP_PKEY_fromdata_init(ctx) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            return nullptr;
+        }
+        EVP_PKEY* pkey = nullptr;
+        if (EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_PUBLIC_KEY, params) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            return nullptr;
+        }
+        EVP_PKEY_CTX_free(ctx);
+        return pkey;
+    }
+
+    static std::vector<uint8_t> secp256k1CompressedPublic(EVP_PKEY* pkey) {
+        unsigned char point[65];
+        size_t len = 0;
+        if (EVP_PKEY_get_octet_string_param(pkey, OSSL_PKEY_PARAM_PUB_KEY, point, sizeof(point), &len) != 1) {
+            throw std::runtime_error("Failed to export secp256k1 public key: " + getOpenSSLError());
+        }
+        if (len == 33) {
+            return std::vector<uint8_t>(point, point + 33);
+        }
+        if (len == 65 && point[0] == 0x04) {
+            std::vector<uint8_t> compressed(33);
+            compressed[0] = (point[64] & 1) ? 0x03 : 0x02;
+            std::memcpy(compressed.data() + 1, point + 1, 32);
+            return compressed;
+        }
+        throw std::runtime_error("Unexpected secp256k1 public key encoding");
+    }
+
+    static void appendDerInteger(std::vector<uint8_t>& out, const uint8_t* value32) {
+        size_t start = 0;
+        while (start < 31 && value32[start] == 0) {
+            start++;
+        }
+        bool pad = (value32[start] & 0x80) != 0;
+        size_t length = 32 - start + (pad ? 1 : 0);
+        out.push_back(0x02);
+        out.push_back(static_cast<uint8_t>(length));
+        if (pad) {
+            out.push_back(0x00);
+        }
+        out.insert(out.end(), value32 + start, value32 + 32);
+    }
+
+    static std::vector<uint8_t> rsToDer(const uint8_t* signature) {
+        std::vector<uint8_t> body;
+        appendDerInteger(body, signature);
+        appendDerInteger(body, signature + 32);
+        std::vector<uint8_t> der;
+        der.push_back(0x30);
+        der.push_back(static_cast<uint8_t>(body.size()));
+        der.insert(der.end(), body.begin(), body.end());
+        return der;
+    }
+
+    static bool derToRs(const uint8_t* der, size_t length, uint8_t* out) {
+        if (length < 8 || der[0] != 0x30 || (der[1] & 0x80) != 0) {
+            return false;
+        }
+        size_t sequenceLength = der[1];
+        if (2 + sequenceLength > length) {
+            return false;
+        }
+        size_t pos = 2;
+        size_t end = 2 + sequenceLength;
+        for (int part = 0; part < 2; part++) {
+            if (pos >= end || der[pos++] != 0x02 || pos >= end) {
+                return false;
+            }
+            size_t encodedLength = der[pos++];
+            if (encodedLength == 0 || encodedLength > 33 || pos + encodedLength > end) {
+                return false;
+            }
+            const uint8_t* value = der + pos;
+            size_t valueLength = encodedLength;
+            if (value[0] == 0x00) {
+                value++;
+                valueLength--;
+            }
+            if (valueLength == 0 || valueLength > 32) {
+                return false;
+            }
+            std::memset(out + part * 32, 0, 32);
+            std::memcpy(out + part * 32 + (32 - valueLength), value, valueLength);
+            pos += encodedLength;
+        }
+        return pos == end;
+    }
+
+    static std::vector<uint8_t> secp256k1Sign(EVP_PKEY* pkey, const uint8_t* message, size_t length) {
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_pkey(nullptr, pkey, nullptr);
+        if (!ctx || EVP_PKEY_sign_init(ctx) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            throw std::runtime_error("Failed to initialize secp256k1 signing: " + getOpenSSLError());
+        }
+        size_t sigLen = 0;
+        if (EVP_PKEY_sign(ctx, nullptr, &sigLen, message, length) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            throw std::runtime_error("Failed to size secp256k1 signature: " + getOpenSSLError());
+        }
+        std::vector<uint8_t> der(sigLen);
+        if (EVP_PKEY_sign(ctx, der.data(), &sigLen, message, length) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            throw std::runtime_error("Failed to create secp256k1 signature: " + getOpenSSLError());
+        }
+        EVP_PKEY_CTX_free(ctx);
+        der.resize(sigLen);
+        std::vector<uint8_t> raw(64);
+        if (!derToRs(der.data(), der.size(), raw.data())) {
+            throw std::runtime_error("Failed to decode secp256k1 signature");
+        }
+        return raw;
+    }
+
+    static bool secp256k1Verify(EVP_PKEY* pkey, const uint8_t* message, size_t length, const uint8_t* signature) {
+        std::vector<uint8_t> der = rsToDer(signature);
+        EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_pkey(nullptr, pkey, nullptr);
+        if (!ctx || EVP_PKEY_verify_init(ctx) != 1) {
+            EVP_PKEY_CTX_free(ctx);
+            throw std::runtime_error("Failed to initialize secp256k1 verification: " + getOpenSSLError());
+        }
+        int result = EVP_PKEY_verify(ctx, der.data(), der.size(), message, length);
+        EVP_PKEY_CTX_free(ctx);
+        return result == 1;
     }
 #endif
 
@@ -174,30 +341,19 @@ namespace cton {
         std::vector<uint8_t> keyData(32);
         
 #if OPENSSL_AVAILABLE
-        // Generate secp256k1 private key using OpenSSL
-        EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
-        if (!ec_key) {
-            throw std::runtime_error("Failed to create EC key for secp256k1");
+        EVP_PKEY* pkey = EVP_PKEY_Q_keygen(nullptr, nullptr, "EC", "secp256k1");
+        if (!pkey) {
+            throw std::runtime_error("Failed to generate secp256k1 key: " + getOpenSSLError());
         }
-        
-        if (EC_KEY_generate_key(ec_key) != 1) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to generate secp256k1 key");
+        BIGNUM* priv = nullptr;
+        if (EVP_PKEY_get_bn_param(pkey, OSSL_PKEY_PARAM_PRIV_KEY, &priv) != 1 ||
+            BN_bn2binpad(priv, keyData.data(), 32) != 32) {
+            BN_clear_free(priv);
+            EVP_PKEY_free(pkey);
+            throw std::runtime_error("Failed to export secp256k1 private key: " + getOpenSSLError());
         }
-        
-        // Extract private key data
-        const BIGNUM* priv_key = EC_KEY_get0_private_key(ec_key);
-        if (!priv_key) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to extract private key");
-        }
-        
-        if (BN_bn2binpad(priv_key, keyData.data(), 32) != 32) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to convert private key to binary");
-        }
-        
-        EC_KEY_free(ec_key);
+        BN_clear_free(priv);
+        EVP_PKEY_free(pkey);
 #else
         throw std::runtime_error("OpenSSL not available - secp256k1 key generation disabled");
 #endif
@@ -211,60 +367,13 @@ namespace cton {
     
     Secp256k1PublicKey Secp256k1PrivateKey::getPublicKey() const {
 #if OPENSSL_AVAILABLE
-        // Generate secp256k1 public key from private key using OpenSSL
-        EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
-        if (!ec_key) {
-            throw std::runtime_error("Failed to create EC key for secp256k1");
+        EVP_PKEY* pkey = secp256k1FromPrivate(keyData_.data(), keyData_.size());
+        if (!pkey) {
+            throw std::runtime_error("Failed to import secp256k1 private key: " + getOpenSSLError());
         }
-        
-        // Create private key BIGNUM from key data
-        BIGNUM* priv_bn = BN_bin2bn(keyData_.data(), keyData_.size(), nullptr);
-        if (!priv_bn) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create BIGNUM from private key data");
-        }
-        
-        // Set private key
-        if (EC_KEY_set_private_key(ec_key, priv_bn) != 1) {
-            BN_free(priv_bn);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set private key");
-        }
-        
-        // Generate public key from private key
-        const EC_GROUP* group = EC_KEY_get0_group(ec_key);
-        EC_POINT* pub_point = EC_POINT_new(group);
-        if (!pub_point || EC_POINT_mul(group, pub_point, priv_bn, nullptr, nullptr, nullptr) != 1) {
-            BN_free(priv_bn);
-            if (pub_point) EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to generate public key point");
-        }
-        
-        // Set public key
-        if (EC_KEY_set_public_key(ec_key, pub_point) != 1) {
-            BN_free(priv_bn);
-            EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set public key");
-        }
-        
-        // Extract public key in compressed format (33 bytes)
-        std::vector<uint8_t> pubKeyData(33);
-        size_t pubKeyLen = EC_POINT_point2oct(group, pub_point,
-                                             POINT_CONVERSION_COMPRESSED,
-                                             pubKeyData.data(), 33, nullptr);
-        
-        BN_free(priv_bn);
-        EC_POINT_free(pub_point);
-        EC_KEY_free(ec_key);
-        
-        if (pubKeyLen > 0) {
-            pubKeyData.resize(pubKeyLen);
-            return Secp256k1PublicKey(pubKeyData);
-        } else {
-            throw std::runtime_error("Failed to extract public key");
-        }
+        std::vector<uint8_t> pubKeyData = secp256k1CompressedPublic(pkey);
+        EVP_PKEY_free(pkey);
+        return Secp256k1PublicKey(pubKeyData);
 #else
         throw std::runtime_error("OpenSSL not available - secp256k1 public key derivation disabled");
 #endif
@@ -287,73 +396,15 @@ namespace cton {
                                            const std::vector<uint8_t>& signature) const {
 #if OPENSSL_AVAILABLE
         if (signature.size() != 64 && signature.size() != 65) {
-            // Invalid signature size
             return false;
         }
-        
-        // Create EC_KEY from public key data
-        EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
-        if (!ec_key) {
-            throw std::runtime_error("Failed to create EC key for secp256k1");
+        EVP_PKEY* pkey = secp256k1FromPublic(keyData_.data(), keyData_.size());
+        if (!pkey) {
+            throw std::runtime_error("Failed to import secp256k1 public key: " + getOpenSSLError());
         }
-        
-        // Set public key
-        EC_POINT* pub_point = EC_POINT_new(EC_KEY_get0_group(ec_key));
-        if (!pub_point) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create public key point");
-        }
-        
-        if (EC_POINT_oct2point(EC_KEY_get0_group(ec_key), pub_point, 
-                              keyData_.data(), keyData_.size(), nullptr) != 1) {
-            EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set public key point");
-        }
-        
-        if (EC_KEY_set_public_key(ec_key, pub_point) != 1) {
-            EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set public key");
-        }
-        
-        EC_POINT_free(pub_point);
-        
-        // Create signature BIGNUMs
-        BIGNUM* r = BN_bin2bn(signature.data(), 32, nullptr);
-        BIGNUM* s = BN_bin2bn(signature.data() + 32, 32, nullptr);
-        if (!r || !s) {
-            if (r) BN_free(r);
-            if (s) BN_free(s);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create signature BIGNUMs");
-        }
-        
-        // Create ECDSA_SIG
-        ECDSA_SIG* sig = ECDSA_SIG_new();
-        if (!sig) {
-            BN_free(r);
-            BN_free(s);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create ECDSA signature");
-        }
-        
-        // Set signature components
-        if (ECDSA_SIG_set0(sig, r, s) != 1) {
-            BN_free(r);
-            BN_free(s);
-            ECDSA_SIG_free(sig);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set signature components");
-        }
-        
-        // Verify signature
-        int result = ECDSA_do_verify(message.data(), message.size(), sig, ec_key);
-        
-        ECDSA_SIG_free(sig);
-        EC_KEY_free(ec_key);
-        
-        return (result == 1);
+        bool valid = secp256k1Verify(pkey, message.data(), message.size(), signature.data());
+        EVP_PKEY_free(pkey);
+        return valid;
 #else
         throw std::runtime_error("OpenSSL not available - secp256k1 signature verification disabled");
 #endif
@@ -493,67 +544,13 @@ namespace cton {
     std::vector<uint8_t> Crypto::signSecp256k1(const Secp256k1PrivateKey& privateKey,
                                              const std::vector<uint8_t>& message) {
 #if OPENSSL_AVAILABLE
-        // Create EC_KEY from private key data
-        EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_secp256k1);
-        if (!ec_key) {
-            throw std::runtime_error("Failed to create EC key for secp256k1");
+        std::vector<uint8_t> keyData = privateKey.getData();
+        EVP_PKEY* pkey = secp256k1FromPrivate(keyData.data(), keyData.size());
+        if (!pkey) {
+            throw std::runtime_error("Failed to import secp256k1 private key: " + getOpenSSLError());
         }
-        
-        // Create private key BIGNUM from key data
-        BIGNUM* priv_bn = BN_bin2bn(privateKey.getData().data(), privateKey.getData().size(), nullptr);
-        if (!priv_bn) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create BIGNUM from private key data");
-        }
-        
-        // Set private key
-        if (EC_KEY_set_private_key(ec_key, priv_bn) != 1) {
-            BN_free(priv_bn);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set private key");
-        }
-        
-        // Generate public key from private key
-        const EC_GROUP* group = EC_KEY_get0_group(ec_key);
-        EC_POINT* pub_point = EC_POINT_new(group);
-        if (!pub_point || EC_POINT_mul(group, pub_point, priv_bn, nullptr, nullptr, nullptr) != 1) {
-            BN_free(priv_bn);
-            if (pub_point) EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to generate public key point");
-        }
-        
-        // Set public key
-        if (EC_KEY_set_public_key(ec_key, pub_point) != 1) {
-            BN_free(priv_bn);
-            EC_POINT_free(pub_point);
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to set public key");
-        }
-        
-        BN_free(priv_bn);
-        EC_POINT_free(pub_point);
-        
-        // Sign message
-        ECDSA_SIG* sig = ECDSA_do_sign(message.data(), message.size(), ec_key);
-        if (!sig) {
-            EC_KEY_free(ec_key);
-            throw std::runtime_error("Failed to create ECDSA signature");
-        }
-        
-        // Extract signature components
-        const BIGNUM* r;
-        const BIGNUM* s;
-        ECDSA_SIG_get0(sig, &r, &s);
-        
-        // Convert to byte array (64 bytes total)
-        std::vector<uint8_t> signature(64);
-        BN_bn2binpad(r, signature.data(), 32);
-        BN_bn2binpad(s, signature.data() + 32, 32);
-        
-        ECDSA_SIG_free(sig);
-        EC_KEY_free(ec_key);
-        
+        std::vector<uint8_t> signature = secp256k1Sign(pkey, message.data(), message.size());
+        EVP_PKEY_free(pkey);
         return signature;
 #else
         throw std::runtime_error("OpenSSL not available - secp256k1 signature creation disabled");

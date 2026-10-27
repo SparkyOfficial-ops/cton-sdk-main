@@ -17,6 +17,7 @@
         <module>java</module>
         <module>api-client</module>
         <module>contract</module>
+        <module>ton-connect</module>
         <module>examples</module>
     </modules>
 
