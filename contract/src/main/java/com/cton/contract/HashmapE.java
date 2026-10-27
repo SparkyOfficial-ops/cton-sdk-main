@@ -92,8 +92,9 @@ final class HashmapE {
         return length;
     }
 
-    /** hml_short$0: унарна довжина і самі біти ключа. */
+    /** hml_short$0: тег 0, унарна довжина, потім біти ключа. */
     private static void writeShortLabel(CellBuilder builder, int keyBits, int length, int offset, int key) {
+        builder.storeBit(false);
         for (int i = 0; i < length; i++) {
             builder.storeBit(true);
         }
