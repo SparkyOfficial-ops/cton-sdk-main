@@ -8,7 +8,6 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
-#include <string>
 
 // Export definitions for Windows DLL
 #ifdef _WIN32
@@ -57,30 +56,24 @@ namespace cton {
              bool isSpecial = false);
         
         /**
-         * @brief Зберегти беззнакове ціле (big-endian, MSB first) у кінець комірки
-         * @param bitCount кількість бітів (0..64)
+         * @brief Зберегти беззнакове ціле
+         * @param bitCount кількість бітів
          * @param value значення
          */
         void storeUInt(size_t bitCount, uint64_t value);
         
         /**
-         * @brief Зберегти знакове ціле (two's complement) у кінець комірки
+         * @brief Зберегти знакове ціле
          * @param bitCount кількість бітів
          * @param value значення
          */
         void storeInt(size_t bitCount, int64_t value);
         
         /**
-         * @brief Зберегти байти у кінець комірки
+         * @brief Зберегти байти
          * @param bytes вектор байтів
          */
         void storeBytes(const std::vector<uint8_t>& bytes);
-        
-        /**
-         * @brief Зберегти один біт (0 або 1) у кінець комірки
-         * @param bit значення біта
-         */
-        void storeBit(bool bit);
         
         /**
          * @brief Додати посилання на комірку
@@ -117,23 +110,24 @@ namespace cton {
          * @return true якщо спеціальна
          */
         bool isSpecial() const;
-        
-        /**
-         * @brief Обчислити representation hash комірки.
-         * sha256(d1 d2 | data з completion-бітом | depth(2) кожного ref | hash(32) кожного ref).
-         * @return 32-байтовий хеш
-         */
-        std::vector<uint8_t> representationHash() const;
 
         /**
-         * @brief Глибина комірки: 0 без посилань, інакше 1 + максимум глибин дітей.
+         * Child cells. The returned pointers stay owned by this cell.
          */
-        uint16_t depth() const;
+        const std::vector<std::shared_ptr<Cell>>& references() const;
 
         /**
-         * @brief Глибока копія дерева. Нова комірка не ділить володіння з оригіналом.
+         * Independent copy of the cell and every cell reachable from it.
+         * The copy does not share Cell objects with the source, so either
+         * tree can be destroyed on its own.
          */
-        std::shared_ptr<Cell> clone() const;
+        static std::shared_ptr<Cell> cloneTree(const Cell* cell);
+
+        /**
+         * Raw cell the caller deletes. Children are shared with {@code cell}
+         * and stay alive after {@code cell} itself is released.
+         */
+        static Cell* releaseCopy(const std::shared_ptr<Cell>& cell);
         
     private:
         std::vector<uint8_t> data_;
@@ -146,13 +140,6 @@ namespace cton {
          * @param bitCount кількість бітів для збереження
          */
         void checkCapacity(size_t bitCount);
-        
-        /**
-         * @brief Дописати біти (MSB first) у кінець комірки
-         * @param count кількість бітів (0..64)
-         * @param value значення
-         */
-        void appendBits(size_t count, uint64_t value);
     };
     
     /**
@@ -172,13 +159,6 @@ namespace cton {
          * @return посилання на себе для ланцюжкових викликів
          */
         CellBuilder& storeUInt(size_t bitCount, uint64_t value);
-        
-        /**
-         * @brief Зберегти один біт
-         * @param bit значення біта
-         * @return посилання на себе для ланцюжкових викликів
-         */
-        CellBuilder& storeBit(bool bit);
         
         /**
          * @brief Зберегти знакове ціле
@@ -201,6 +181,12 @@ namespace cton {
          * @return посилання на себе для ланцюжкових викликів
          */
         CellBuilder& storeRef(std::shared_ptr<Cell> cell);
+
+        /**
+         * Append another cell's bits and references into this builder.
+         * Used when a dictionary leaf stores its value inline.
+         */
+        CellBuilder& appendCell(const Cell& cell);
         
         /**
          * @brief Побудувати комірку

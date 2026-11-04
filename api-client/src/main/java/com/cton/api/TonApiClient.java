@@ -16,7 +16,6 @@ import com.cton.api.dto.BlockHeader;
 import com.cton.api.dto.BlockTransactions;
 import com.cton.api.dto.SendBocResult;
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -205,7 +204,7 @@ public class TonApiClient {
      * @return результат виконання методу
      * @throws IOException якщо сталася помилка мережі
      */
-    public JsonObject runGetMethod(String address, String method, JsonArray stack) throws IOException {
+    public JsonObject runGetMethod(String address, String method, JsonObject stack) throws IOException {
         // формуємо URL запиту
         // формируем URL запроса
         // build request URL
@@ -232,7 +231,7 @@ public class TonApiClient {
      * @return результат виконання методу
      * @throws IOException якщо сталася помилка мережі
      */
-    public <T> T runGetMethod(String address, String method, JsonArray stack, Class<T> resultClass) throws IOException {
+    public <T> T runGetMethod(String address, String method, JsonObject stack, Class<T> resultClass) throws IOException {
         // формуємо URL запиту
         // формируем URL запроса
         // build request URL
@@ -258,7 +257,7 @@ public class TonApiClient {
      * @param stack параметри методу
      * @return CompletableFuture з результатом виконання методу
      */
-    public CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonArray stack) {
+    public CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonObject stack) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return runGetMethod(address, method, stack);
@@ -276,7 +275,7 @@ public class TonApiClient {
      * @param resultClass клас для десеріалізації результату
      * @return CompletableFuture з результатом виконання методу
      */
-    public <T> CompletableFuture<T> runGetMethodAsync(String address, String method, JsonArray stack, Class<T> resultClass) {
+    public <T> CompletableFuture<T> runGetMethodAsync(String address, String method, JsonObject stack, Class<T> resultClass) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return runGetMethod(address, method, stack, resultClass);

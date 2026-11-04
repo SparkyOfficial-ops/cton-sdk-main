@@ -42,6 +42,28 @@ namespace cton {
                                           const std::string& passphrase = "");
         
         /**
+         * Перетворення мнемоніки в seed за алгоритмом TON (Tonkeeper / MyTonWallet / Telegram Wallet)
+         * TON-native seed derivation (PBKDF2-HMAC-SHA512 зі сіртами "TON default seed" / "TON quick seed")
+         * @param mnemonic мнемонічна фраза
+         * @param fast використовувати швидкий режим (1000 ітерацій) замість стандартного (100000)
+         * @param passphrase опціональна парольна фраза
+         * @return seed (64 байти)
+         */
+        static std::vector<uint8_t> toTonSeed(const std::vector<std::string>& mnemonic,
+                                             bool fast = false,
+                                             const std::string& passphrase = "");
+        
+        /**
+         * Перевірка валідності мнемонічної фрази саме за стандартом TON
+         * (HMAC/PBKDF2 перевірка першого байта сіду, сумісна з Tonkeeper/MyTonWallet)
+         * @param mnemonic мнемонічна фраза
+         * @param passphrase парольна фраза (порожня для звичайної перевірки)
+         * @return true якщо фраза валідна як TON мнемоніка
+         */
+        static bool isTonMnemonic(const std::vector<std::string>& mnemonic,
+                                  const std::string& passphrase = "");
+        
+        /**
          * Перевірка валідності мнемонічної фрази
          * @param mnemonic мнемонічна фраза
          * @return true якщо фраза валідна
@@ -53,40 +75,6 @@ namespace cton {
          * @return вектор слів
          */
         static const std::vector<std::string>& getWordlist();
-        
-        // ------------------------------------------------------------
-        // TON Mnemonic (використовується Tonkeeper, MyTonWallet, Telegram Wallet)
-        // відрізняється від BIP-39: свой salt та 100 000 ітерацій PBKDF2
-        // ------------------------------------------------------------
-        
-        /**
-         * Генерація мнемонічної фрази TON (12 або 24 слова)
-         * @param wordCount кількість слів (12 або 24)
-         * @return вектор слів мнемоніки TON
-         */
-        static std::vector<std::string> generateTon(int wordCount = 24);
-        
-        /**
-         * Перевірка валідності мнемоніки TON (контрольний біт похідної ентропії)
-         * @param mnemonic мнемонічна фраза
-         * @return true якщо фраза валідна для TON
-         */
-        static bool isValidTon(const std::vector<std::string>& mnemonic);
-        
-        /**
-         * Перетворення мнемоніки TON на seed (PBKDF2-HMAC-SHA512,
-         * сіль "TON default seed", 100 000 ітерацій)
-         * @param mnemonic мнемонічна фраза
-         * @return seed (64 байти)
-         */
-        static std::vector<uint8_t> toTonSeed(const std::vector<std::string>& mnemonic);
-        
-        /**
-         * Швидкий варіант seed TON (сіль "TON fast seed") — для кастодіальних/сервісних кошелеків
-         * @param mnemonic мнемонічна фраза
-         * @return seed (64 байти)
-         */
-        static std::vector<uint8_t> toTonSeedFast(const std::vector<std::string>& mnemonic);
         
     private:
         // Приватний конструктор для статичного класу

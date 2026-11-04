@@ -161,27 +161,15 @@ public class MultiSigWallet extends BaseWallet {
             throw new IllegalArgumentException("Not enough signatures provided");
         }
         
-        int count = Math.min(requiredSignatures, signedTransactions.size());
-        return packRefs(signedTransactions.subList(0, count));
-    }
-
-    /**
-     * Комірка тримає щонайбільше 4 посилання. Якщо підписів більше,
-     * три лежать тут, а четверте посилання веде на наступну комірку ланцюжка.
-     */
-    private static Cell packRefs(List<Cell> refs) {
-        CellBuilder builder = new CellBuilder();
-        if (refs.size() <= 4) {
-            for (Cell ref : refs) {
-                builder.storeRef(ref);
-            }
-            return builder.build();
+        // Створюємо фінальну комірку з усіма підписами
+        CellBuilder finalBuilder = new CellBuilder();
+        
+        // Додаємо всі підписи
+        for (int i = 0; i < Math.min(requiredSignatures, signedTransactions.size()); i++) {
+            finalBuilder.storeRef(signedTransactions.get(i));
         }
-        builder.storeRef(refs.get(0));
-        builder.storeRef(refs.get(1));
-        builder.storeRef(refs.get(2));
-        builder.storeRef(packRefs(refs.subList(3, refs.size())));
-        return builder.build();
+        
+        return finalBuilder.build();
     }
     
     /**

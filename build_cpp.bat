@@ -40,7 +40,7 @@ if not exist cpp\build mkdir cpp\build
 
 REM Build C++ core without explicit toolchain (rely on system OpenSSL)
 cd cpp\build
-cmake .. -G "Visual Studio 17 2022" -A x64
+cmake ..
 cmake --build . --config Release
 
 REM Check if build was successful

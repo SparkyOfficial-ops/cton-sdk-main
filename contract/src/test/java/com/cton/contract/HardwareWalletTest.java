@@ -8,6 +8,7 @@ package com.cton.contract;
 import java.io.IOException;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -85,7 +86,7 @@ public class HardwareWalletTest {
             "device_12345"
         );
         
-        assertEquals(200, hardwareWallet.getVersion());
+        assertThrows(IOException.class, hardwareWallet::getVersion);
     }
     
     @Test
@@ -113,7 +114,8 @@ public class HardwareWalletTest {
         List<String> supportedDevices = HardwareWallet.getSupportedDevices();
         
         assertNotNull(supportedDevices);
-        assertTrue(supportedDevices.isEmpty());
+        assertFalse(supportedDevices.isEmpty());
+        assertEquals(List.of("Ledger"), supportedDevices);
     }
     
     @Test
@@ -178,8 +180,7 @@ public class HardwareWalletTest {
             "device_12345"
         );
         
-        IOException error = assertThrows(IOException.class, hardwareWallet::getAddressFromDevice);
-        assertTrue(error.getMessage().contains("was not read from a device"));
+        assertThrows(IOException.class, hardwareWallet::getAddressFromDevice);
     }
     
     @Test
@@ -201,5 +202,14 @@ public class HardwareWalletTest {
         com.cton.sdk.Cell transaction = hardwareWallet.createTransfer(destination, amount, "Test transfer");
         
         assertNotNull(transaction);
+    }
+
+    @Test
+    public void testLedgerApduFraming() {
+        byte[] apdu = LedgerApdu.command(LedgerApdu.INS_GET_ADDRESS, 0, 0, new byte[] {0x01, 0x02});
+        assertArrayEquals(new byte[] {(byte) 0xE0, 0x04, 0x00, 0x00, 0x02, 0x01, 0x02}, apdu);
+        byte[] response = new byte[] {0x0A, (byte) 0x90, 0x00};
+        assertEquals(LedgerApdu.SW_OK, LedgerApdu.statusWord(response));
+        assertArrayEquals(new byte[] {0x0A}, LedgerApdu.payload(response));
     }
 }

@@ -8,7 +8,7 @@ package com.cton.api.liteclient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import static org.junit.jupiter.api.Assertions.*;
-import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 
 /**
  * Тести для TonProxyApiClient
@@ -50,7 +50,7 @@ public class TonProxyApiClientTest {
         // Тест виконання методу без підключення
         // Тест выполнения метода без подключения
         // Test method execution without connection
-        JsonArray stack = new JsonArray();
+        JsonObject stack = new JsonObject();
         assertThrows(java.io.IOException.class, () -> {
             client.runGetMethod("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N", "get_balance", stack);
         });

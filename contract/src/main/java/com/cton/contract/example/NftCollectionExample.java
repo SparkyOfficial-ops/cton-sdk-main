@@ -11,7 +11,6 @@ import java.util.List;
 
 import com.cton.api.TonApiClient;
 import com.cton.contract.NftCollection;
-import com.cton.contract.WalletV4;
 import com.cton.sdk.Address;
 import com.cton.sdk.Cell;
 import com.cton.sdk.CellBuilder;
@@ -60,16 +59,16 @@ public class NftCollectionExample {
             // Create private key (for example)
             Crypto.PrivateKey privateKey = Crypto.PrivateKey.generate();
             
-            // Гаманець мінтера сплачує газ і надсилає внутрішнє повідомлення в колекцію.
-            // NFT-колекція не приймає зовнішнє повідомлення напряму.
-            Address minterAddress = new Address("EQA8cLh74oFKcL523Jz9Hw5ReXY6Yglz8g422w7NwzvzL03V");
-            WalletV4 minterWallet = new WalletV4(minterAddress, apiClient);
-
-            // Адреса власника NFT
+            // Адреса власника
+            // Адрес владельца
+            // Owner address
             Address owner = new Address("EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N");
             
+            // Створюємо один NFT
+            // Создаем один NFT
+            // Create one NFT
             long nextIndex = collection.getNextItemIndex();
-            collection.mintNft(minterWallet, owner, content, nextIndex, privateKey);
+            collection.mintNft(owner, content, nextIndex, privateKey);
             System.out.println("Minted NFT with index: " + nextIndex);
             
             // Масове створення NFT
@@ -82,7 +81,7 @@ public class NftCollectionExample {
                 contents.add(batchContentBuilder.build());
             }
             
-            collection.batchMint(minterWallet, owner, contents, privateKey);
+            collection.batchMint(owner, contents, privateKey);
             System.out.println("Batch minted 5 NFTs");
             
             // Отримуємо адресу NFT за індексом

@@ -1,17 +1,43 @@
 @echo off
-REM OpenSSL 4.1.0 (released 23 Oct 2026) is not in vcpkg yet.
-REM The vcpkg port is still 3.6.5, and CMake rejects anything older than 4.1.
+REM Install OpenSSL via vcpkg
 REM Author: Андрій Будильников (Sparky)
 
-echo OpenSSL 4.1.0 is not packaged by vcpkg yet.
-echo Build it from the Visual Studio x64 developer prompt.
-echo Perl and NASM must be on PATH.
-echo.
-echo   git clone --depth 1 --branch openssl-4.1.0 https://github.com/openssl/openssl.git openssl-4.1.0-src
-echo   cd openssl-4.1.0-src
-echo   perl Configure VC-WIN64A no-shared --prefix=..\openssl-4.1.0 --openssldir=..\openssl-4.1.0\ssl
-echo   nmake
-echo   nmake install
-echo.
-echo CMake then picks up openssl-4.1.0 next to the cpp directory.
-exit /b 0
+echo Installing OpenSSL via vcpkg...
+
+REM Check if vcpkg directory exists
+if not exist vcpkg (
+    echo Cloning vcpkg...
+    git clone https://github.com/Microsoft/vcpkg.git
+    if %ERRORLEVEL% NEQ 0 (
+        echo Failed to clone vcpkg
+        exit /b %ERRORLEVEL%
+    )
+)
+
+cd vcpkg
+
+REM Bootstrap vcpkg if not already done
+if not exist vcpkg.exe (
+    echo Bootstrapping vcpkg...
+    cmd /c bootstrap-vcpkg.bat
+    if %ERRORLEVEL% NEQ 0 (
+        echo Failed to bootstrap vcpkg
+        cd ..
+        exit /b %ERRORLEVEL%
+    )
+)
+
+REM Install OpenSSL
+echo Installing OpenSSL...
+cmd /c vcpkg install openssl:x64-windows
+
+if %ERRORLEVEL% EQU 0 (
+    echo OpenSSL installed successfully!
+    echo Libraries should be available at vcpkg\installed\x64-windows\lib\
+) else (
+    echo Failed to install OpenSSL
+    cd ..
+    exit /b %ERRORLEVEL%
+)
+
+cd ..

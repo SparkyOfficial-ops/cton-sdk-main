@@ -11,7 +11,6 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,11 +56,12 @@ public class WalletConnectTest {
         dAppMetadata.put("name", "Test dApp");
         dAppMetadata.put("url", "https://test.com");
         
-        UnsupportedOperationException error = assertThrows(
-            UnsupportedOperationException.class,
-            () -> walletConnect.createSession(dAppMetadata)
-        );
-        assertTrue(error.getMessage().contains("WalletConnect v2 relay is not implemented"));
+        String sessionUri = walletConnect.createSession(dAppMetadata);
+        
+        assertNotNull(sessionUri);
+        assertTrue(sessionUri.startsWith("tc://?v=2&id="));
+        assertTrue(sessionUri.contains("&r="));
+        assertTrue(sessionUri.contains("bridge.tonapi.io"));
     }
     
     @Test
@@ -133,8 +133,9 @@ public class WalletConnectTest {
                 params
             );
             
-            assertFalse(response.isSuccess());
-            assertTrue(response.getError().contains("WalletConnect v2 relay is not implemented"));
+            assertTrue(response.isSuccess());
+            assertNotNull(response.getResult());
+            assertTrue(response.getResult().containsKey("status"));
         } catch (Exception e) {
             fail("Should not throw exception: " + e.getMessage());
         }
@@ -174,8 +175,9 @@ public class WalletConnectTest {
         // Потім підтверджуємо його
         WalletConnect.WalletConnectResponse response = walletConnect.approveRequest("test_req_4", null);
         
-        assertFalse(response.isSuccess());
-        assertTrue(response.getError().contains("WalletConnect v2 relay is not implemented"));
+        assertTrue(response.isSuccess());
+        assertNotNull(response.getResult());
+        assertEquals("approved", response.getResult().get("status"));
     }
     
     @Test

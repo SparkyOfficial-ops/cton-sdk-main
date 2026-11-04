@@ -5,8 +5,12 @@
 
 package com.cton.contract;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -47,12 +51,6 @@ import com.google.gson.JsonObject;
  * - Работа с get-методами смарт-контрактов
  */
 public abstract class BaseWallet implements Wallet {
-    /**
-     * send_mode = PAY_GAS_SEPARATELY (1) | IGNORE_ERRORS (2).
-     * Газ списується з балансу гаманця, а value внутрішнього повідомлення доходить до контракту повністю.
-     */
-    public static final int SEND_MODE_PAY_GAS_SEPARATELY = 3;
-
     protected final Address address;
     protected final TonApiClient apiClient;
     
@@ -99,98 +97,49 @@ public abstract class BaseWallet implements Wallet {
     
     @Override
     public Cell createTransfer(Address destination, BigInteger amount, String comment) throws IOException {
-        // Створюємо тіло внутрішнього повідомлення (op=0x0 + коментар)
-        // Build the internal message body (op code + comment)
+        // Повертаємо стандартне внутрішнє повідомлення (TL-B int_msg_info$0),
+        // яке кошелек перешле одержувачу.
+        return createInternalMessage(destination, amount, comment, destination.isBounceable());
+    }
+    
+    /**
+     * Тіло повідомлення: код операції (0x00000000 = текстовий коментар) + байти коментаря.
+     */
+    protected Cell createMessageBody(String comment) {
         CellBuilder bodyBuilder = new CellBuilder();
-        
-        // Код операції: 0x00000000 = простий переказ з текстовим коментарем
-        bodyBuilder.storeUInt(32, 0);
-        
+        bodyBuilder.storeUInt(32, 0); // op = 0x00000000 (text comment)
         if (comment != null && !comment.isEmpty()) {
             bodyBuilder.storeBytes(comment.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
-        
-        Cell body = bodyBuilder.build();
-        
-        // Створюємо внутрішнє повідомлення (int_msg_info) згідно з TL-B TON:
-        //   int_msg_info$0 ihr_disabled bounce discarded src value
-        //     ihr_fee fwd_fee created_lt created_at init body
-        return buildInternalMessage(destination, amount, body, true);
+        return bodyBuilder.build();
     }
     
     /**
-     * Побудувати стандартне внутрішнє повідомлення (int_msg_info) за TL-B TON.
-     *
-     * @param destination адрес отримувача
-     * @param amount сума в нанотонах (Value)
-     * @param body тіло повідомлення (буде додане як ref)
-     * @param bounce чи повідомлення bounceable
-     * @return комірка з внутрішнім повідомленням
+     * Створює валідне внутрішнє повідомлення (TL-B int_msg_info$0) від адреси
+     *шелька до одержувача.
      */
-    protected Cell buildInternalMessage(Address destination, BigInteger amount, Cell body, boolean bounce) {
-        CellBuilder b = new CellBuilder();
-        b.storeBit(false);          // int_msg_info$0
-        b.storeBit(true);           // ihr_disabled = 1
-        b.storeBit(bounce);         // bounce
-        b.storeBit(false);          // discarded = 0
-        b.storeUInt(2, 0);          // src = addr_none
-        b.storeAddress(destination);// dst = addr_std
-        b.storeCoins(amount);       // value: Grams
-        b.storeBit(false);          // extra currencies (ExtraCurrencies$0) = nothing
-        b.storeCoins(BigInteger.ZERO); // ihr_fee
-        b.storeCoins(BigInteger.ZERO); // fwd_fee
-        b.storeUInt(64, 0);         // created_lt
-        b.storeUInt(32, 0);         // created_at
-        b.storeBit(false);          // init = Nothing
-        if (body == null) {
-            b.storeBit(false);      // body = Nothing
-        } else {
-            b.storeBit(true);       // body = ^Cell
-            b.storeRef(body);
-        }
-        return b.build();
+    protected Cell createInternalMessage(Address destination, BigInteger amount, String comment, boolean bounce) {
+        return createInternalMessage(destination, amount, createMessageBody(comment), bounce);
     }
 
-    /**
-     * Внутрішнє повідомлення з необов'язковим StateInit за посиланням.
-     */
-    protected Cell buildInternalMessage(Address destination, BigInteger amount, Cell body,
-                                        boolean bounce, Cell stateInit) {
-        CellBuilder b = new CellBuilder();
-        b.storeBit(false);
-        b.storeBit(true);
-        b.storeBit(bounce);
-        b.storeBit(false);
-        b.storeUInt(2, 0);
-        b.storeAddress(destination);
-        b.storeCoins(amount);
-        b.storeBit(false);
-        b.storeCoins(BigInteger.ZERO);
-        b.storeCoins(BigInteger.ZERO);
-        b.storeUInt(64, 0);
-        b.storeUInt(32, 0);
-        if (stateInit == null) {
-            b.storeBit(false);
-        } else {
-            b.storeBit(true);
-            b.storeBit(true);
-            b.storeRef(stateInit);
-        }
-        if (body == null) {
-            b.storeBit(false);
-        } else {
-            b.storeBit(true);
-            b.storeRef(body);
-        }
-        return b.build();
-    }
-    
-    /**
-     * Час дії транзакції (valid_until). 0 = без обмеження.
-     * @return unix timestamp до якого транзакція дійсна
-     */
-    protected long getValidUntil() {
-        return System.currentTimeMillis() / 1000 + 60;
+    protected Cell createInternalMessage(Address destination, BigInteger amount, Cell body, boolean bounce) {
+        CellBuilder msg = new CellBuilder();
+        msg.storeUInt(1, 0);                       // int_msg_info$0
+        msg.storeUInt(1, 1);                       // ihr_disabled = true
+        msg.storeUInt(1, bounce ? 1 : 0);          // bounce
+        msg.storeUInt(1, 0);                       // bounced = false
+        msg.storeAddress(this.address);            // src (адресашелька)
+        msg.storeAddress(destination);             // dst
+        msg.storeCoins(amount);                    // value (Grams)
+        msg.storeUInt(1, 0);                       // extra currencies: порожній dict
+        msg.storeCoins(BigInteger.ZERO);           // ihr_fee
+        msg.storeCoins(BigInteger.ZERO);           // fwd_fee
+        msg.storeUInt(64, 0);                      // created_lt
+        msg.storeUInt(32, Instant.now().getEpochSecond()); // created_at
+        msg.storeUInt(1, 0);                       // init: відсутній StateInit
+        msg.storeUInt(1, 1);                       // body: у референсі
+        msg.storeRef(body);
+        return msg.build();
     }
     
     @Override
@@ -211,13 +160,37 @@ public abstract class BaseWallet implements Wallet {
         // Send through API
         apiClient.sendBoc(bocBytes);
     }
+
+    /**
+     * Hash returned by Toncenter {@code sendBoc}. It is base64 of the external message cell hash.
+     */
+    public static String messageHash(JsonObject response) throws IOException {
+        if (response == null) {
+            throw new IOException("sendBoc returned an empty response");
+        }
+        if (response.has("ok") && !response.get("ok").isJsonNull() && !response.get("ok").getAsBoolean()) {
+            throw new IOException("sendBoc rejected the message");
+        }
+        JsonObject result = response;
+        if (response.has("result") && response.get("result").isJsonObject()) {
+            result = response.getAsJsonObject("result");
+        }
+        if (!result.has("hash") || result.get("hash").isJsonNull()) {
+            throw new IOException("sendBoc response has no message hash");
+        }
+        String hash = result.get("hash").getAsString();
+        if (hash == null || hash.isBlank()) {
+            throw new IOException("sendBoc response has no message hash");
+        }
+        return hash;
+    }
     
     @Override
     public long getSeqno() throws IOException {
         // Виконуємо get-метод seqno
         // Выполняем get-метод seqno
         // Execute seqno get-method
-        JsonArray stack = new JsonArray();
+        JsonObject stack = new JsonObject();
         JsonObject result = runGetMethod("seqno", stack);
         
         // Перевіряємо чи є результат
@@ -260,7 +233,7 @@ public abstract class BaseWallet implements Wallet {
         // Виконуємо get-метод get_version
         // Выполняем get-метод get_version
         // Execute get_version get-method
-        JsonArray stack = new JsonArray();
+        JsonObject stack = new JsonObject();
         JsonObject result = runGetMethod("get_version", stack);
         
         // Перевіряємо чи є результат
@@ -305,7 +278,7 @@ public abstract class BaseWallet implements Wallet {
      * @return результат виконання методу
      * @throws IOException якщо сталася помилка мережі
      */
-    protected JsonObject runGetMethod(String method, JsonArray stack) throws IOException {
+    protected JsonObject runGetMethod(String method, JsonObject stack) throws IOException {
         return apiClient.runGetMethod(address.toRaw(), method, stack);
     }
     
@@ -318,209 +291,137 @@ public abstract class BaseWallet implements Wallet {
      * @throws IOException якщо сталася помилка мережі
      */
     public void transfer(Address destination, BigInteger amount, String comment, Crypto.PrivateKey privateKey) throws IOException {
-        // Внутрішнє повідомлення-ордер. Підпис і зовнішнє повідомлення збирає гаманець.
-        Cell orderMessage = createTransfer(destination, amount, comment);
-        sendSignedOrder(orderMessage, getSendMode(), privateKey);
-    }
-
-    /**
-     * Надіслати внутрішнє повідомлення в контракт через цей гаманець (V3 або V4).
-     * У мережу йде лише external-in на адресу гаманця. Контракт отримує internal message
-     * з {@code body} як пейлоадом; газ у TON списує гаманець.
-     */
-    @Override
-    public void sendInternalMessage(Address destination, BigInteger tonAmount, Cell body,
-                                    Crypto.PrivateKey privateKey) throws IOException {
-        int version = getVersion();
-        if (version != 3 && version != 4) {
-            throw new IOException(
-                "Jetton, NFT and DeFi operations must be internal messages from Wallet V3 or V4. Wallet version: "
-                    + version);
-        }
-        if (destination == null) {
-            throw new IOException("Internal message destination is required");
-        }
-        if (body == null) {
-            throw new IOException("Internal message body is required");
-        }
-        if (tonAmount == null || tonAmount.signum() <= 0) {
-            throw new IOException("Attached TON amount must be positive: the wallet pays gas");
-        }
-        Cell orderMessage = buildInternalMessage(destination, tonAmount, body, true);
-        sendSignedOrder(orderMessage, SEND_MODE_PAY_GAS_SEPARATELY, privateKey);
-    }
-
-    /**
-     * Підписати кілька внутрішніх повідомлень одним external-in і надіслати BOC у мережу.
-     * @return BOC зовнішнього повідомлення у Base64
-     */
-    public String sendTransfers(List<OutgoingTransfer> transfers, Crypto.PrivateKey privateKey,
-                                Long validUntil) throws IOException {
-        if (transfers == null || transfers.isEmpty() || transfers.size() > 4) {
-            throw new IOException("Wallet external message accepts from 1 to 4 internal messages");
-        }
-        List<Cell> orders = new ArrayList<>(transfers.size());
-        int[] modes = new int[transfers.size()];
-        for (int i = 0; i < transfers.size(); i++) {
-            OutgoingTransfer transfer = transfers.get(i);
-            orders.add(buildInternalMessage(
-                transfer.destination, transfer.amount, transfer.body, transfer.bounce, transfer.stateInit));
-            modes[i] = transfer.sendMode;
-        }
-        return signAndSend(orders, modes, privateKey, validUntil == null ? getValidUntil() : validUntil);
-    }
-
-    /**
-     * Підписати ордер ключем гаманця і надіслати external-in на адресу цього гаманця.
-     * Підпис — Ed25519 над representation hash тіла, а не над BOC пейлоада контракту.
-     */
-    private void sendSignedOrder(Cell orderMessage, int sendMode, Crypto.PrivateKey privateKey) throws IOException {
-        signAndSend(java.util.Collections.singletonList(orderMessage), new int[] { sendMode },
-            privateKey, getValidUntil());
-    }
-
-    private String signAndSend(List<Cell> orders, int[] sendModes, Crypto.PrivateKey privateKey,
-                               long validUntil) throws IOException {
-        if (privateKey == null) {
-            throw new IOException("Private key is required to sign the wallet message");
-        }
-        long seqno = seqnoForSigning();
-        if (seqno == 0 && orders.size() > 2) {
-            throw new IOException("The first wallet transaction carries StateInit and at most 2 messages");
-        }
-        long subwalletId = getSubwalletIdAsLong();
-        Cell signingBody = buildWalletBody(subwalletId, validUntil, seqno, sendModes, orders);
-        byte[] signature = Crypto.sign(privateKey, signingBody.representationHash());
-        Cell externalMessage = buildExternalMessage(
-            signature, subwalletId, validUntil, seqno, sendModes, orders, privateKey);
-        Boc boc = new Boc(externalMessage);
-        byte[] bocBytes = boc.serialize(true, true);
-        boc.close();
-        apiClient.sendBoc(bocBytes);
-        return Base64.getEncoder().encodeToString(bocBytes);
+        // 1. Отримуємо seqno та параметри підкошелька
+        long seqno = getSeqno();
+        int subwalletId = getSubwalletId();
+        long validUntil = Instant.now().getEpochSecond() + 60; // валідність 1 хвилина
+        int sendMode = 3; // PAYABLE_FWD_FEE | DESTROY_ON_ZERO_BALANCE (стандартний простий переказ)
+        
+        // 2. Внутрішнє повідомлення-платеж (int_msg_info)
+        Cell internalMessage = createInternalMessage(destination, amount, comment, destination.isBounceable());
+        
+        // 3. Тіло для підпису:
+        //    signing_body = subwallet_id(32) + valid_until(32) + seqno(32) + send_mode(8) + [Order Message]
+        Cell signingBody = buildSigningBody(subwalletId, validUntil, seqno, sendMode, internalMessage);
+        
+        // 4. signature = Ed25519( representation_hash(signing_body) )
+        byte[] signingHash = cellRepresentationHash(signingBody);
+        byte[] signature = Crypto.sign(privateKey, signingHash);
+        
+        // 5. Тіло зовнішнього повідомлення: signature(512 bits) + signing_body
+        Cell externalBody = buildSignedExternalBody(signature, subwalletId, validUntil, seqno, sendMode, internalMessage);
+        
+        // 6. Гортаємо в ext_in_msg_info$10 (зовнішнє in-повідомлення до контракту кошелька)
+        Cell externalMessage = createExternalInMessage(externalBody);
+        
+        // 7. Надсилаємо через API
+        sendTransaction(externalMessage);
     }
     
     /**
-     * Тіло гаманцевої транзакції:
-     * subwallet_id(32) + valid_until(32) + seqno(32) + дія + ref(order).
-     * Для V3 дія — це send_mode. Для V4 перед ним стоїть opcode 0 (simple send).
+     * Тіло, що підписується (Wallet V3/V4): subwallet_id + valid_until + seqno + send_mode + [Message].
      */
-    protected Cell buildWalletBody(long subwalletId, long validUntil, long seqno, Cell orderMessage) {
-        return buildWalletBody(subwalletId, validUntil, seqno, getSendMode(), orderMessage);
-    }
-
-    protected Cell buildWalletBody(long subwalletId, long validUntil, long seqno, int sendMode, Cell orderMessage) {
+    protected Cell buildSigningBody(int subwalletId, long validUntil, long seqno, int sendMode, Cell internalMessage) {
         CellBuilder b = new CellBuilder();
-        b.storeUInt(32, subwalletId);   // subwallet_id
-        b.storeUInt(32, validUntil);    // valid_until
-        b.storeUInt(32, seqno);         // seqno
-        storeOutgoingAction(b, sendMode, orderMessage);
-        return b.build();
-    }
-
-    protected Cell buildWalletBody(long subwalletId, long validUntil, long seqno,
-                                   int[] sendModes, List<Cell> orderMessages) {
-        CellBuilder b = new CellBuilder();
-        b.storeUInt(32, subwalletId);
+        b.storeUInt(32, subwalletId & 0xFFFFFFFFL);
         b.storeUInt(32, validUntil);
         b.storeUInt(32, seqno);
-        storeOutgoingActions(b, sendModes, orderMessages);
+        b.storeUInt(8, sendMode);
+        b.storeRef(internalMessage);
         return b.build();
     }
-
-    /**
-     * Дія гаманця після seqno. V3 пише send_mode і референс на внутрішнє повідомлення.
-     * Wallet V4 перевизначає цей метод і додає opcode 0.
-     */
-    protected void storeOutgoingAction(CellBuilder builder, int sendMode, Cell orderMessage) {
-        storeOutgoingActions(builder, new int[] { sendMode }, java.util.Collections.singletonList(orderMessage));
-    }
-
-    /**
-     * Кілька внутрішніх повідомлень. V4 перед списком пише opcode 0.
-     * У комірці не більше чотирьох посилань.
-     */
-    protected void storeOutgoingActions(CellBuilder builder, int[] sendModes, List<Cell> orderMessages) {
-        for (int i = 0; i < orderMessages.size(); i++) {
-            builder.storeUInt(8, sendModes[i]);
-            builder.storeRef(orderMessages.get(i));
-        }
-    }
     
     /**
-     * Режим надсилання внутрішнього повідомлення (send_mode).
-     * 6 = PAY_GAS_SEPARATELY | DESTROY_IF_ZERO.
-     * @return 8-бітне значення send_mode
+     * Тіло зовнішнього повідомлення = підпис (64 байти = 512 біт) + той самий вміст signing_body.
      */
-    protected int getSendMode() {
-        return 6;
-    }
-    
-    /**
-     * Зовнішнє in-повідомлення (ext_in_msg_info$10).
-     * Якщо seqno == 0, до init:(Maybe (Either StateInit ^StateInit)) пишеться inline StateInit
-     * гаманця V3R2 або V4R2, інакше Maybe = Nothing.
-     */
-    private Cell buildExternalMessage(byte[] signature, long subwalletId, long validUntil, long seqno,
-                                      int[] sendModes, List<Cell> orderMessages, Crypto.PrivateKey privateKey) throws IOException {
+    protected Cell buildSignedExternalBody(byte[] signature, int subwalletId, long validUntil,
+                                           long seqno, int sendMode, Cell internalMessage) {
         CellBuilder b = new CellBuilder();
-        b.storeUInt(2, 2);                 // ext_in_msg_info$10
-        b.storeUInt(2, 0);                 // src = addr_none
-        b.storeAddress(this.address);      // dst = адреса гаманця, не контракту жетона
-        b.storeCoins(BigInteger.ZERO);     // import_fee = 0
-        if (seqno == 0) {
-            int version = getVersion();
-            if (version != 3 && version != 4) {
-                throw new IOException("First transaction StateInit is implemented for Wallet V3R2 and V4R2");
-            }
-            Crypto.PublicKey publicKey = privateKey.getPublicKey();
-            try {
-                StateInit init = StateInit.forWallet(version, subwalletId, publicKey.getData());
-                b.storeBit(true);          // Maybe = Just
-                b.storeBit(false);         // Either = Left, StateInit inline
-                init.store(b);
-            } finally {
-                publicKey.close();
-            }
-        } else {
-            b.storeBit(false);             // Maybe = Nothing
-        }
-        b.storeBit(false);                 // body = Either left (inline)
-        b.storeBytes(signature);           // signature (512 біт)
-        b.storeUInt(32, subwalletId);      // subwallet_id
-        b.storeUInt(32, validUntil);       // valid_until
-        b.storeUInt(32, seqno);            // seqno
-        storeOutgoingActions(b, sendModes, orderMessages);
+        b.storeBytes(signature);                    // 512 біт підпису
+        b.storeUInt(32, subwalletId & 0xFFFFFFFFL);
+        b.storeUInt(32, validUntil);
+        b.storeUInt(32, seqno);
+        b.storeUInt(8, sendMode);
+        b.storeRef(internalMessage);
         return b.build();
     }
-
+    
     /**
-     * Нерозгорнутий рахунок не має методу seqno. Для першої транзакції це seqno 0.
+     * Зовнішнє in-повідомлення (ext_in_msg_info$10) до адреси самого кошелька.
      */
-    private long seqnoForSigning() throws IOException {
-        if (!isAccountActive()) {
-            return 0;
-        }
-        return getSeqno();
-    }
-
-    private boolean isAccountActive() throws IOException {
-        JsonObject info = apiClient.getAddressInformation(address.toRaw());
-        if (!info.has("result") || !info.get("result").isJsonObject()) {
-            return false;
-        }
-        JsonObject result = info.getAsJsonObject("result");
-        if (!result.has("state") || result.get("state").isJsonNull()) {
-            return false;
-        }
-        return "active".equals(result.get("state").getAsString());
+    protected Cell createExternalInMessage(Cell body) {
+        CellBuilder msg = new CellBuilder();
+        msg.storeUInt(2, 2);              // ext_in_msg_info$10
+        msg.storeUInt(2, 0);             // src = addr_none$00
+        msg.storeAddress(this.address);  // dst = адреса кошелька
+        msg.storeCoins(BigInteger.ZERO); // import_fee = 0
+        msg.storeUInt(1, 0);             // init: відсутній StateInit
+        msg.storeUInt(1, 1);             // body: у референсі
+        msg.storeRef(body);
+        return msg.build();
     }
     
-    private long getSubwalletIdAsLong() {
+    /**
+     * Обчислює representation hash комірки (SHA-256 від стандартного представлення комірки:
+     * d1 + d2 + дані(з completion tag) + для кожного референсу 2-байтна глибина + 32-байтний хеш).
+     */
+    protected static byte[] cellRepresentationHash(Cell cell) {
+        return reprHashAndDepth(cell).hash;
+    }
+    
+    private static final class HashDepth {
+        final byte[] hash;
+        final int depth;
+        HashDepth(byte[] hash, int depth) {
+            this.hash = hash;
+            this.depth = depth;
+        }
+    }
+    
+    private static HashDepth reprHashAndDepth(Cell cell) {
+        int bitSize = cell.getBitSize();
+        byte[] data = cell.getData();          // ceil(bitSize/8) байтів (хвости обнулені)
+        int refsCount = cell.getRefsCount();
+        
+        // Дескриптори: d1 = refs (звичайна комірка), d2 = floor(bits/8) + ceil(bits/8)
+        int d1 = refsCount & 0x7F;
+        int d2 = (bitSize / 8) + ((bitSize + 7) / 8);
+        
+        // Копія даних із completion tag (біт 1 + нулі до байтової межі), якщо bits % 8 != 0
+        byte[] reprData = data.clone();
+        if (bitSize % 8 != 0 && reprData.length > 0) {
+            int last = reprData.length - 1;
+            int mask = 0x80 >> (bitSize % 8);
+            reprData[last] = (byte) (reprData[last] | mask);
+        }
+        
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(d1);
+        out.write(d2);
+        out.write(reprData, 0, reprData.length);
+        
+        int maxRefDepth = 0;
+        for (int i = 0; i < refsCount; i++) {
+            Cell ref = cell.getRef(i);
+            HashDepth rh = reprHashAndDepth(ref);
+            out.write((rh.depth >> 8) & 0xFF);
+            out.write(rh.depth & 0xFF);
+            out.write(rh.hash, 0, rh.hash.length);
+            if (rh.depth > maxRefDepth) {
+                maxRefDepth = rh.depth;
+            }
+        }
+        
+        byte[] hash = sha256(out.toByteArray());
+        int depth = (refsCount == 0) ? 0 : (maxRefDepth + 1);
+        return new HashDepth(hash, depth);
+    }
+    
+    private static byte[] sha256(byte[] input) {
         try {
-            return getSubwalletId() & 0xFFFFFFFFL;
-        } catch (Exception e) {
-            return 698983191L & 0xFFFFFFFFL;
+            return MessageDigest.getInstance("SHA-256").digest(input);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
         }
     }
 }

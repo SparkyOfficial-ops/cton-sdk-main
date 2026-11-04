@@ -11,7 +11,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -116,7 +115,7 @@ public class TonProxyApiClient implements LiteClient {
     }
     
     @Override
-    public JsonObject runGetMethod(String address, String method, JsonArray stack) throws IOException {
+    public JsonObject runGetMethod(String address, String method, JsonObject stack) throws IOException {
         if (!connected) {
             throw new IOException("Not connected to proxy server");
         }
@@ -164,7 +163,7 @@ public class TonProxyApiClient implements LiteClient {
     }
     
     @Override
-    public CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonArray stack) {
+    public CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonObject stack) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 return runGetMethod(address, method, stack);

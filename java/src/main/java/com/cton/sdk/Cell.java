@@ -4,7 +4,6 @@
 package com.cton.sdk;
 
 import java.io.Closeable;
-import java.lang.ref.Cleaner;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
@@ -51,9 +50,6 @@ public class Cell implements Closeable {
         
         // Отримання референсу за індексом
         Pointer cell_get_ref(Pointer cell, int index);
-        
-        // Representation hash комірки (sha256) — потрібен для підпису транзакції
-        boolean cell_representation_hash(Pointer cell, byte[] out, int outLen);
     }
     
     // Зробимо поле доступним для інших класів в тому самому пакеті
@@ -61,17 +57,12 @@ public class Cell implements Closeable {
     // Сделаем поле доступным для других классов в том же пакете
     Pointer nativeCell;
     private boolean closed = false;
-    private final Cleaner.Cleanable cleanable;
     
     /**
      * Конструктор за замовчуванням
      */
     public Cell() {
         this.nativeCell = CtonLibrary.INSTANCE.cell_create();
-        if (this.nativeCell == null) {
-            throw new OutOfMemoryError("cell_create failed");
-        }
-        this.cleanable = NativeResources.track(this, nativeCell, CtonLibrary.INSTANCE::cell_destroy);
     }
     
     /**
@@ -81,19 +72,6 @@ public class Cell implements Closeable {
      */
     Cell(Pointer nativeCell) {
         this.nativeCell = nativeCell;
-        this.cleanable = nativeCell == null
-            ? null
-            : NativeResources.track(this, nativeCell, CtonLibrary.INSTANCE::cell_destroy);
-    }
-
-    /**
-     * Курсор читання цієї комірки. Slice тримає власну копію дерева.
-     */
-    public Slice toSlice() {
-        if (closed) {
-            throw new IllegalStateException("Cell has been closed");
-        }
-        return Slice.from(this);
     }
     
     /**
@@ -156,31 +134,6 @@ public class Cell implements Closeable {
             throw new RuntimeException("Failed to store reference in cell");
         }
         return this;
-    }
-    
-    /**
-     * Додати один біт (0 або 1) до комірки
-     * @param bit значення біта
-     * @return this для ланцюгових викликів
-     */
-    public Cell storeBit(boolean bit) {
-        return storeUInt(1, bit ? 1 : 0);
-    }
-    
-    /**
-     * Обчислити representation hash комірки (sha256 від d1 d2 | data | ref hashes).
-     * Саме ці 32 байти підписує контракть гаманця (Ed25519).
-     * @return 32-байтовий хеш
-     */
-    public byte[] representationHash() {
-        if (closed) {
-            throw new IllegalStateException("Cell has been closed");
-        }
-        byte[] out = new byte[32];
-        if (!CtonLibrary.INSTANCE.cell_representation_hash(nativeCell, out, out.length)) {
-            throw new RuntimeException("Failed to compute cell representation hash");
-        }
-        return out;
     }
     
     /**
@@ -252,13 +205,10 @@ public class Cell implements Closeable {
      */
     @Override
     public void close() {
-        if (closed) {
-            return;
-        }
-        closed = true;
-        nativeCell = null;
-        if (cleanable != null) {
-            cleanable.clean();
+        if (!closed && nativeCell != null) {
+            CtonLibrary.INSTANCE.cell_destroy(nativeCell);
+            nativeCell = null;
+            closed = true;
         }
     }
 }

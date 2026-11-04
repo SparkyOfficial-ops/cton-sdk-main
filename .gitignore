@@ -7,15 +7,12 @@ vcpkg/scripts/buildsystems/tmp/
 vcpkg/vcpkg
 vcpkg/vcpkg.exe
 
-# OpenSSL source and the local 4.1.0 build (not part of the SDK)
+# OpenSSL (if downloaded manually)
 openssl-*
-/openssl-4.1.0/
-/openssl-4.1.0-dist/
 
 
 # Build output directories
 cpp/build/
-cpp/build-msvc/
 cpp/cmake-build*/
 */target/
 */bin/
@@ -60,8 +57,6 @@ Makefile
 *.dll
 *.so
 *.dylib
-# JNA extracts this from the JAR (classpath resource win32-x86-64/cton-sdk-core.dll)
-!java/src/main/resources/win32-x86-64/cton-sdk-core.dll
 
 # Log files
 *.log

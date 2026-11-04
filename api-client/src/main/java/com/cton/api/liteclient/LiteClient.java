@@ -8,7 +8,6 @@ package com.cton.api.liteclient;
 import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 /**
@@ -47,7 +46,7 @@ public interface LiteClient {
      * @return результат виконання методу
      * @throws IOException якщо сталася помилка мережі
      */
-    JsonObject runGetMethod(String address, String method, JsonArray stack) throws IOException;
+    JsonObject runGetMethod(String address, String method, JsonObject stack) throws IOException;
     
     /**
      * Асинхронно виконати get-метод смарт-контракту
@@ -56,7 +55,7 @@ public interface LiteClient {
      * @param stack параметри методу
      * @return CompletableFuture з результатом виконання методу
      */
-    CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonArray stack);
+    CompletableFuture<JsonObject> runGetMethodAsync(String address, String method, JsonObject stack);
     
     /**
      * Отримати інформацію про блок

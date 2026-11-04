@@ -10,8 +10,7 @@ import java.math.BigInteger;
 
 import com.cton.api.TonApiClient;
 import com.cton.sdk.Address;
-import com.cton.sdk.CellBuilder;
-import com.cton.sdk.Crypto;
+import com.cton.sdk.Cell;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -39,7 +38,7 @@ public class Jetton extends Contract {
      * @throws IOException якщо сталася помилка мережі
      */
     public BigInteger getTotalSupply() throws IOException {
-        JsonArray stack = new JsonArray();
+        JsonObject stack = new JsonObject();
         JsonObject result = runGetMethod("get_jetton_data", stack);
         
         // Перевіряємо чи є результат
@@ -83,7 +82,7 @@ public class Jetton extends Contract {
      * @throws IOException якщо сталася помилка мережі
      */
     public Address getJettonMinter() throws IOException {
-        JsonArray stack = new JsonArray();
+        JsonObject stack = new JsonObject();
         JsonObject result = runGetMethod("get_jetton_data", stack);
         
         // Перевіряємо чи є результат
@@ -128,11 +127,14 @@ public class Jetton extends Contract {
      * @throws IOException якщо сталася помилка мережі
      */
     public BigInteger getBalance(Address owner) throws IOException {
-        JsonArray stack = new JsonArray();
-        JsonArray ownerItem = new JsonArray();
-        ownerItem.add("tvm.Slice");
-        ownerItem.add(owner.toRaw());
-        stack.add(ownerItem);
+        JsonObject stack = new JsonObject();
+        // Додаємо адресу власника до стеку
+        // Добавляем адрес владельца в стек
+        // Add owner address to stack
+        JsonArray ownerArray = new JsonArray();
+        ownerArray.add("tvm.Slice");
+        ownerArray.add(owner.toRaw());
+        stack.add("address", ownerArray);
         
         JsonObject result = runGetMethod("get_wallet_data", stack);
         
@@ -178,11 +180,14 @@ public class Jetton extends Contract {
      * @throws IOException якщо сталася помилка мережі
      */
     public Address getWalletAddress(Address owner) throws IOException {
-        JsonArray stack = new JsonArray();
-        JsonArray ownerItem = new JsonArray();
-        ownerItem.add("tvm.Slice");
-        ownerItem.add(owner.toRaw());
-        stack.add(ownerItem);
+        JsonObject stack = new JsonObject();
+        // Додаємо адресу власника до стеку
+        // Добавляем адрес владельца в стек
+        // Add owner address to stack
+        JsonArray ownerArray = new JsonArray();
+        ownerArray.add("tvm.Slice");
+        ownerArray.add(owner.toRaw());
+        stack.add("address", ownerArray);
         
         JsonObject result = runGetMethod("get_wallet_address", stack);
         
@@ -222,72 +227,13 @@ public class Jetton extends Contract {
     }
     
     /**
-     * Переказ жетонів через гаманець власника.
-     * Jetton-wallet шукається у мінтера за адресою гаманця.
-     *
-     * @param ownerWallet гаманець V3/V4, який підписує зовнішнє повідомлення і сплачує газ
-     * @param toAddress новий власник жетонів
-     * @param amount кількість жетонів
-     * @param forwardAmount TON (нанотони), який jetton-wallet перешле далі
-     * @param comment коментар у forward_payload
-     * @param privateKey ключ гаманця
+     * Internal message the owner's TON wallet must send to the owner's jetton wallet.
+     * The destination is resolved with {@code get_wallet_address} on this minter.
+     * {@code tonAmount} is the TON attached to that internal message.
      */
-    public void transfer(Wallet ownerWallet, Address toAddress, BigInteger amount,
-                         BigInteger forwardAmount, String comment, Crypto.PrivateKey privateKey) throws IOException {
-        if (ownerWallet == null) {
-            throw new IOException("Owner wallet is required to send the jetton transfer");
-        }
-        Address jettonWalletAddress = getWalletAddress(ownerWallet.getAddress());
-        transfer(ownerWallet, jettonWalletAddress, toAddress, amount, forwardAmount, comment, privateKey);
-    }
-
-    /**
-     * Переказ жетонів. Тіло з опкодом 0x0f8a7ea5 іде внутрішнім повідомленням
-     * на jetton-wallet відправника. Підпис Ed25519 ставить гаманець власника,
-     * а не контракт жетона: jetton-wallet не приймає external-in.
-     *
-     * @param ownerWallet гаманець V3/V4, який підписує зовнішнє повідомлення і сплачує газ
-     * @param jettonWalletAddress jetton-wallet відправника (отримувач внутрішнього повідомлення)
-     * @param toAddress новий власник жетонів
-     * @param amount кількість жетонів
-     * @param forwardAmount TON (нанотони), який jetton-wallet перешле далі
-     * @param comment коментар у forward_payload
-     * @param privateKey ключ гаманця
-     */
-    public void transfer(Wallet ownerWallet, Address jettonWalletAddress, Address toAddress, BigInteger amount,
-                         BigInteger forwardAmount, String comment, Crypto.PrivateKey privateKey) throws IOException {
-        if (ownerWallet == null) {
-            throw new IOException("Owner wallet is required to send the jetton transfer");
-        }
-        if (jettonWalletAddress == null) {
-            throw new IOException("Jetton wallet address is required");
-        }
-        BigInteger forward = forwardAmount == null ? BigInteger.ZERO : forwardAmount;
-        if (forward.signum() < 0) {
-            throw new IOException("forwardAmount must be non-negative");
-        }
-
-        // Тіло transfer#0f8a7ea5 за TEP-74. Це пейлоад внутрішнього повідомлення, не зовнішнє.
-        CellBuilder bodyBuilder = new CellBuilder();
-        bodyBuilder.storeUInt(32, 0x0f8a7ea5);
-        bodyBuilder.storeUInt(64, 0);
-        bodyBuilder.storeCoins(amount);
-        bodyBuilder.storeAddress(toAddress);
-        bodyBuilder.storeAddress(ownerWallet.getAddress());
-        bodyBuilder.storeBit(false); // custom_payload = Nothing
-        bodyBuilder.storeCoins(forward);
-        if (comment != null && !comment.isEmpty()) {
-            bodyBuilder.storeBit(true); // forward_payload = ^Cell
-            CellBuilder commentBuilder = new CellBuilder();
-            commentBuilder.storeUInt(32, 0);
-            commentBuilder.storeBytes(comment.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            bodyBuilder.storeRef(commentBuilder.build());
-        } else {
-            bodyBuilder.storeBit(false); // порожній inline forward_payload
-        }
-
-        // Гаманець прикріплює forward_ton плюс газ, інакше jetton-wallet не зможе переслати повідомлення.
-        BigInteger attachedTon = forward.add(DEFAULT_ATTACHED_TON);
-        sendThroughWallet(ownerWallet, jettonWalletAddress, bodyBuilder.build(), attachedTon, privateKey);
+    public Cell transfer(Address owner, Address recipient, BigInteger jettonAmount,
+                         BigInteger tonAmount, BigInteger forwardAmount, String comment) throws IOException {
+        return JettonWallet.ofOwner(this, owner).createInternalTransfer(
+                owner, recipient, jettonAmount, tonAmount, forwardAmount, comment, true);
     }
 }

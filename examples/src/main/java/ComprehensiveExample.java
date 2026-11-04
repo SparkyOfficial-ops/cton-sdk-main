@@ -88,8 +88,7 @@ public class ComprehensiveExample {
         System.out.println("------------------");
         System.out.println("// Address contractAddress = new Address(\"EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N\");");
         System.out.println("// Contract contract = new Contract(contractAddress, client) {};");
-        System.out.println("// JsonArray stack = new JsonArray();");
-        System.out.println("// stack.add(slice); // [\"tvm.Slice\", \"0:...\"]");
+        System.out.println("// JsonObject stack = new JsonObject();");
         System.out.println("// JsonObject result = contract.runGetMethod(\"get_wallet_data\", stack);");
         System.out.println("");
         

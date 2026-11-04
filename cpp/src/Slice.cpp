@@ -1,142 +1,100 @@
-// Slice.cpp - читання бітів комірки TON (MSB first)
-
 #include "../include/Slice.h"
+
 #include <stdexcept>
 
 namespace cton {
 
     Slice::Slice(const Cell& cell)
-        : cell_(cell.clone()), bitPos_(0), refPos_(0) {
-        data_ = cell_->getData();
+        : data_(cell.getData()), bitSize_(cell.getBitSize()), bitPos_(0), refPos_(0) {
+        refs_.reserve(cell.references().size());
+        for (const auto& ref : cell.references()) {
+            refs_.push_back(Cell::cloneTree(ref.get()));
+        }
     }
 
-    uint64_t Slice::readBits(size_t count) {
-        if (count > 64) {
-            throw std::invalid_argument("Slice can load at most 64 bits at once");
+    uint64_t Slice::readBits(size_t bits) {
+        if (bits > 64) {
+            throw std::invalid_argument("Cannot load more than 64 bits at once");
         }
-        if (bitPos_ + count > cell_->getBitSize()) {
-            throw std::out_of_range("Slice underflow");
+        if (bitPos_ + bits > bitSize_) {
+            throw std::out_of_range("Slice has fewer bits than requested");
         }
         uint64_t value = 0;
-        for (size_t i = 0; i < count; ++i) {
+        for (size_t i = 0; i < bits; ++i) {
             size_t pos = bitPos_ + i;
             uint8_t bit = static_cast<uint8_t>((data_[pos / 8] >> (7 - (pos % 8))) & 1);
             value = (value << 1) | bit;
         }
-        bitPos_ += count;
+        bitPos_ += bits;
         return value;
     }
 
-    uint64_t Slice::loadUInt(size_t bits) {
-        if (bits == 0) {
-            return 0;
-        }
+    uint64_t Slice::loadUint(size_t bits) {
         return readBits(bits);
     }
 
     int64_t Slice::loadInt(size_t bits) {
         if (bits == 0 || bits > 64) {
-            throw std::invalid_argument("loadInt supports 1..64 bits");
+            throw std::invalid_argument("signed load must be 1..64 bits");
         }
-        uint64_t value = readBits(bits);
-        if (bits < 64 && ((value >> (bits - 1)) & 1ULL)) {
-            uint64_t sign = ~((1ULL << bits) - 1ULL);
-            value |= sign;
+        uint64_t raw = readBits(bits);
+        if (bits == 64) {
+            return static_cast<int64_t>(raw);
         }
-        return static_cast<int64_t>(value);
-    }
-
-    std::vector<uint8_t> Slice::loadBytes(size_t length) {
-        std::vector<uint8_t> out(length);
-        for (size_t i = 0; i < length; ++i) {
-            out[i] = static_cast<uint8_t>(readBits(8));
+        uint64_t sign = 1ULL << (bits - 1);
+        if (raw & sign) {
+            uint64_t extend = (~0ULL) << bits;
+            return static_cast<int64_t>(raw | extend);
         }
-        return out;
-    }
-
-    std::optional<Address> Slice::loadAddress() {
-        uint64_t tag = readBits(2);
-        if (tag == 0) {
-            return std::nullopt;
-        }
-        if (tag == 1) {
-            uint64_t len = readBits(9);
-            if (len > 0) {
-                readBits(len > 64 ? 64 : len);
-                size_t left = static_cast<size_t>(len > 64 ? len - 64 : 0);
-                while (left > 0) {
-                    size_t step = left > 64 ? 64 : left;
-                    readBits(step);
-                    left -= step;
-                }
-            }
-            throw std::invalid_argument("External address is not a standard MsgAddressInt");
-        }
-
-        bool anycast = readBits(1) != 0;
-        if (anycast) {
-            uint64_t depth = readBits(5);
-            size_t left = static_cast<size_t>(depth);
-            while (left > 0) {
-                size_t step = left > 64 ? 64 : left;
-                readBits(step);
-                left -= step;
-            }
-        }
-
-        if (tag == 2) {
-            int64_t workchain = loadInt(8);
-            std::vector<uint8_t> hash = loadBytes(32);
-            return Address(static_cast<int8_t>(workchain), hash);
-        }
-
-        uint64_t addrLen = readBits(9);
-        int64_t workchain = loadInt(32);
-        if (workchain < -128 || workchain > 127 || addrLen != 256) {
-            size_t left = static_cast<size_t>(addrLen);
-            while (left > 0) {
-                size_t step = left > 64 ? 64 : left;
-                readBits(step);
-                left -= step;
-            }
-            throw std::invalid_argument("addr_var does not fit workchain:int8 and 256-bit hash");
-        }
-        std::vector<uint8_t> hash = loadBytes(32);
-        return Address(static_cast<int8_t>(workchain), hash);
+        return static_cast<int64_t>(raw);
     }
 
     std::vector<uint8_t> Slice::loadCoins() {
-        size_t len = static_cast<size_t>(readBits(4));
-        if (len == 0) {
-            return {};
+        uint64_t length = readBits(4);
+        if (length > 15) {
+            throw std::out_of_range("VarUInteger 16 length is out of range");
         }
-        if (len > 15) {
-            throw std::invalid_argument("VarUInteger 16 length is out of range");
+        std::vector<uint8_t> bytes(static_cast<size_t>(length));
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            bytes[i] = static_cast<uint8_t>(readBits(8));
         }
-        return loadBytes(len);
+        return bytes;
+    }
+
+    bool Slice::loadAddress(Address& out) {
+        uint64_t tag = readBits(2);
+        if (tag == 0) {
+            return false;
+        }
+        if (tag != 2) {
+            throw std::invalid_argument("only addr_none and addr_std can be loaded");
+        }
+        uint64_t anycast = readBits(1);
+        if (anycast != 0) {
+            throw std::invalid_argument("anycast addresses are not supported");
+        }
+        int64_t workchain = loadInt(8);
+        std::vector<uint8_t> hash(32);
+        for (size_t i = 0; i < hash.size(); ++i) {
+            hash[i] = static_cast<uint8_t>(readBits(8));
+        }
+        out = Address(static_cast<int8_t>(workchain), hash);
+        return true;
     }
 
     std::shared_ptr<Cell> Slice::loadRef() {
-        if (refPos_ >= cell_->getRefsCount()) {
+        if (refPos_ >= refs_.size()) {
             throw std::out_of_range("Slice has no more references");
         }
-        auto refs = cell_->getReferences();
-        auto ref = refs[refPos_].lock();
-        if (!ref) {
-            throw std::runtime_error("Slice reference expired");
-        }
-        ++refPos_;
-        return ref;
+        return refs_[refPos_++];
     }
 
     size_t Slice::remainingBits() const {
-        size_t total = cell_->getBitSize();
-        return bitPos_ >= total ? 0 : total - bitPos_;
+        return bitSize_ - bitPos_;
     }
 
     size_t Slice::remainingRefs() const {
-        size_t total = cell_->getRefsCount();
-        return refPos_ >= total ? 0 : total - refPos_;
+        return refs_.size() - refPos_;
     }
 
 }

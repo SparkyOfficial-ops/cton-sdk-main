@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <random>
 #include <cstring>
-#include <cctype>
 #include <sstream>
 #include <algorithm>
 
@@ -15,9 +14,7 @@
 #if defined(OPENSSL_AVAILABLE) && OPENSSL_AVAILABLE
 #include <openssl/sha.h>
 #include <openssl/evp.h>
-#include <openssl/hmac.h>
 #include <openssl/kdf.h>
-#include <openssl/rand.h>
 #endif
 
 namespace cton {
@@ -397,6 +394,78 @@ namespace cton {
         return seed;
     }
     
+    // Допоміжна функція PBKDF2-HMAC-SHA512, спільна для TON-похідних функцій
+    // Shared PBKDF2-HMAC-SHA512 helper for TON seed derivation / validation
+    static std::vector<uint8_t> pbkdf2Sha512(const std::string& password,
+                                             const std::string& salt,
+                                             uint32_t iterations,
+                                             size_t dkLen) {
+        std::vector<uint8_t> out(dkLen, 0);
+#if defined(OPENSSL_AVAILABLE) && OPENSSL_AVAILABLE
+        if (PKCS5_PBKDF2_HMAC(
+                password.c_str(), static_cast<int>(password.length()),
+                reinterpret_cast<const unsigned char*>(salt.c_str()), static_cast<int>(salt.length()),
+                static_cast<int>(iterations), EVP_sha512(),
+                static_cast<int>(dkLen), out.data()) != 1) {
+            std::fill(out.begin(), out.end(), 0);
+        }
+#endif
+        return out;
+    }
+    
+    std::vector<uint8_t> Mnemonic::toTonSeed(const std::vector<std::string>& mnemonic,
+                                            bool fast,
+                                            const std::string& passphrase) {
+        // З'єднуємо слова мнемоніки через пробіл (нормалізована TON-фраза)
+        std::string mnemonicString;
+        for (size_t i = 0; i < mnemonic.size(); ++i) {
+            if (i > 0) mnemonicString += " ";
+            mnemonicString += mnemonic[i];
+        }
+        
+        // TON standard: salt = "TON default seed" (або "TON quick seed" для швидкого режиму) + passphrase
+        std::string baseSalt = fast ? "TON quick seed" : "TON default seed";
+        std::string salt = baseSalt + passphrase;
+        
+        // 100000 ітерацій за замовчуванням, 1000 для швидкого режиму; dkLen = 64
+        uint32_t iterations = fast ? 1000 : 100000;
+        
+        return pbkdf2Sha512(mnemonicString, salt, iterations, 64);
+    }
+    
+    bool Mnemonic::isTonMnemonic(const std::vector<std::string>& mnemonic,
+                                 const std::string& passphrase) {
+        // Довжина TON мнемоніки: 12, 15, 18, 21 або 24 слова
+        if (mnemonic.size() != 12 && mnemonic.size() != 15 && mnemonic.size() != 18 &&
+            mnemonic.size() != 21 && mnemonic.size() != 24) {
+            return false;
+        }
+        
+        // Усі слова мають бути у BIP-39 wordlist
+        for (const auto& word : mnemonic) {
+            if (std::find(BIP39_WORDLIST.begin(), BIP39_WORDLIST.end(), word) == BIP39_WORDLIST.end()) {
+                return false;
+            }
+        }
+        
+        std::string mnemonicString;
+        for (size_t i = 0; i < mnemonic.size(); ++i) {
+            if (i > 0) mnemonicString += " ";
+            mnemonicString += mnemonic[i];
+        }
+        
+        // Перевірка за першим байтом сіду:
+        //   без пароля: salt = "TON seed version",       ітерацій = 390, очікуємо seed[0] == 1
+        //   з паролем:  salt = "TON fast seed version",  ітерацій = 1,   очікуємо seed[0] == 0
+        bool hasPassphrase = !passphrase.empty();
+        std::string salt = (hasPassphrase ? "TON fast seed version" : "TON seed version") + passphrase;
+        uint32_t iterations = hasPassphrase ? 1 : 390;
+        
+        std::vector<uint8_t> seed = pbkdf2Sha512(mnemonicString, salt, iterations, 64);
+        
+        return seed[0] == (hasPassphrase ? 0 : 1);
+    }
+    
     bool Mnemonic::isValid(const std::vector<std::string>& mnemonic) {
         // Перевірка валідності мнемонічної фрази
         // Validate mnemonic phrase
@@ -481,143 +550,6 @@ namespace cton {
     
     const std::vector<std::string>& Mnemonic::getWordlist() {
         return BIP39_WORDLIST;
-    }
-    
-    // ------------------------------------------------------------------
-    // TON Mnemonic — історичний формат гаманців TON (Tonkeeper/MyTonWallet/TON Wallet)
-    // Відрізняється від BIP-39: солт "TON default seed" та 100 000 ітерацій PBKDF2.
-    // ------------------------------------------------------------------
-    namespace {
-        // Нормалізація фрази: маленькі літери, одинарні пробіли
-        std::string joinTonMnemonic(const std::vector<std::string>& mnemonic) {
-            std::string s;
-            for (size_t i = 0; i < mnemonic.size(); ++i) {
-                std::string w = mnemonic[i];
-                std::transform(w.begin(), w.end(), w.begin(),
-                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                // прибираємо зайві пробіли
-                while (!w.empty() && w.front() == ' ') w.erase(w.begin());
-                while (!w.empty() && w.back() == ' ') w.pop_back();
-                if (!s.empty()) s += " ";
-                s += w;
-            }
-            return s;
-        }
-        
-        // PBKDF2-HMAC-SHA512 (raw bytes як пароль — важливо для TON!)
-        bool pbkdf2Sha512Raw(const std::vector<uint8_t>& password,
-                             const std::string& salt,
-                             int iterations,
-                             uint8_t* out, size_t outLen) {
-#if defined(OPENSSL_AVAILABLE) && OPENSSL_AVAILABLE
-            return PKCS5_PBKDF2_HMAC(reinterpret_cast<const char*>(password.data()),
-                                     static_cast<int>(password.size()),
-                                     reinterpret_cast<const unsigned char*>(salt.data()),
-                                     static_cast<int>(salt.size()),
-                                     iterations, EVP_sha512(),
-                                     static_cast<int>(outLen), out) == 1;
-#else
-            (void)password; (void)salt; (void)iterations; (void)out; (void)outLen;
-            return false;
-#endif
-        }
-    }
-    
-    std::vector<uint8_t> Mnemonic::toTonSeed(const std::vector<std::string>& mnemonic) {
-        std::string phrase = joinTonMnemonic(mnemonic);
-        std::vector<uint8_t> password(phrase.begin(), phrase.end());
-        
-        std::vector<uint8_t> seed(64, 0);
-        if (!pbkdf2Sha512Raw(password, "TON default seed", 100000, seed.data(), seed.size())) {
-            throw std::runtime_error("TON seed derivation failed (PBKDF2)");
-        }
-        return seed;
-    }
-    
-    std::vector<uint8_t> Mnemonic::toTonSeedFast(const std::vector<std::string>& mnemonic) {
-        std::string phrase = joinTonMnemonic(mnemonic);
-        std::vector<uint8_t> password(phrase.begin(), phrase.end());
-        
-        std::vector<uint8_t> seed(64, 0);
-        if (!pbkdf2Sha512Raw(password, "TON fast seed", 100, seed.data(), seed.size())) {
-            throw std::runtime_error("TON fast seed derivation failed (PBKDF2)");
-        }
-        return seed;
-    }
-    
-    bool Mnemonic::isValidTon(const std::vector<std::string>& mnemonic) {
-        if (mnemonic.size() != 12 && mnemonic.size() != 24) {
-            return false;
-        }
-        // Усі слова мають бути у wordlist
-        for (const auto& word : mnemonic) {
-            if (std::find(BIP39_WORDLIST.begin(), BIP39_WORDLIST.end(), word) == BIP39_WORDLIST.end()) {
-                return false;
-            }
-        }
-        
-        std::string phrase = joinTonMnemonic(mnemonic);
-        std::vector<uint8_t> password(phrase.begin(), phrase.end());
-        
-        std::vector<uint8_t> derived(64, 0);
-        if (!pbkdf2Sha512Raw(password, "TON mnemonic seed", 100000, derived.data(), derived.size())) {
-            return false;
-        }
-        
-        // Контрольна сума: перший біт derived має бути 0 (валідна TON-фраз)
-        return (derived[0] & 0x80) == 0;
-    }
-    
-    std::vector<std::string> Mnemonic::generateTon(int wordCount) {
-        if (wordCount != 12 && wordCount != 24) {
-            throw std::invalid_argument("TON word count must be 12 or 24");
-        }
-#if defined(OPENSSL_AVAILABLE) && OPENSSL_AVAILABLE
-        int entropyLen = (wordCount == 12) ? 16 : 32;
-        
-        std::vector<std::string> words;
-        // Метод гаманців TON: ентропію -> seed -> слова, з відкиданням фраз,
-        // що не проходять контрольний біт.
-        while (words.empty()) {
-            std::vector<uint8_t> entropy(entropyLen);
-            if (RAND_bytes(entropy.data(), entropyLen) != 1) {
-                throw std::runtime_error("TON mnemonic generation failed (RAND_bytes)");
-            }
-            
-            // seed = PBKDF2(entropy, "TON default seed", 100000)
-            std::vector<uint8_t> seed(64, 0);
-            if (!pbkdf2Sha512Raw(entropy, "TON default seed", 100000, seed.data(), seed.size())) {
-                throw std::runtime_error("TON mnemonic generation failed (PBKDF2)");
-            }
-            
-            // Перетворюємо ентропію на індекси слів (11 біт на слово)
-            std::vector<uint8_t> bits;
-            bits.reserve(entropyLen * 8);
-            for (uint8_t b : entropy) {
-                for (int i = 7; i >= 0; --i) {
-                    bits.push_back((b >> i) & 1);
-                }
-            }
-            
-            words.clear();
-            for (int w = 0; w < wordCount; ++w) {
-                int index = 0;
-                for (int j = 0; j < 11; ++j) {
-                    size_t bitPos = static_cast<size_t>(w) * 11 + j;
-                    int bit = (bitPos < bits.size()) ? bits[bitPos] : 0;
-                    index = (index << 1) | bit;
-                }
-                words.push_back(BIP39_WORDLIST[index % BIP39_WORDLIST.size()]);
-            }
-            
-            if (!isValidTon(words)) {
-                words.clear(); // фраза не пройшла контрольний біт — генеруємо заново
-            }
-        }
-        return words;
-#else
-        throw std::runtime_error("OpenSSL not available - TON mnemonic generation disabled");
-#endif
     }
     
     std::vector<uint8_t> Mnemonic::calculateChecksum(const std::vector<uint8_t>& entropy) {

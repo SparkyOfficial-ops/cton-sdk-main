@@ -243,6 +243,16 @@ namespace cton {
          * @return приватний ключ
          */
         static PrivateKey mnemonicToPrivateKey(const std::vector<std::string>& mnemonic);
+        
+        /**
+         * Створення ключа з mnemonic фрази за алгоритмом TON
+         * (сід = Mnemonic::toTonSeed, приватний ключ = перші 32 байти сіду)
+         * @param mnemonic мнемонічна фраза
+         * @param fast швидкий режим генерації сіду
+         * @return приватний ключ
+         */
+        static PrivateKey mnemonicToPrivateKeyTon(const std::vector<std::string>& mnemonic,
+                                                  bool fast = false);
     };
     
 }

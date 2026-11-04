@@ -10,7 +10,6 @@ import java.math.BigInteger;
 
 import com.cton.sdk.Address;
 import com.cton.sdk.Cell;
-import com.cton.sdk.Crypto;
 
 /**
  * Інтерфейс для роботи з TON кошельком
@@ -60,21 +59,6 @@ public interface Wallet {
      * @throws IOException якщо сталася помилка мережі
      */
     void sendTransaction(Cell transaction) throws IOException;
-
-    /**
-     * Надіслати внутрішнє повідомлення в контракт через цей гаманець.
-     * Гаманець приймає зовнішнє повідомлення, сплачує газ у TON і кладе
-     * {@code body} (наприклад опкод 0x0f8a7ea5) у внутрішній пейлоад на {@code destination}.
-     * Jetton Wallet, NFT і DeFi-пули зовнішні повідомлення від користувача не приймають.
-     *
-     * @param destination контракт-отримувач внутрішнього повідомлення
-     * @param tonAmount сума TON (нанотони), яку гаманець прикріплює до повідомлення
-     * @param body тіло внутрішнього повідомлення
-     * @param privateKey ключ гаманця
-     * @throws IOException якщо гаманець не V3/V4 або сталася помилка мережі
-     */
-    void sendInternalMessage(Address destination, BigInteger tonAmount, Cell body,
-                             Crypto.PrivateKey privateKey) throws IOException;
     
     /**
      * Отримати послідовний номер (seqno) кошелька

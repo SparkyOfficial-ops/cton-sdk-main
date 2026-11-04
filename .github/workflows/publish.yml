@@ -31,11 +31,6 @@ jobs:
     - name: Setup MSVC
       uses: ilammy/msvc-dev-cmd@v1
       
-    - name: Setup CMake
-      uses: jwlawson/actions-setup-cmake@v1.14
-      with:
-        cmake-version: '3.22.x'
-        
     - name: Setup vcpkg
       run: |
         # Always ensure vcpkg is properly set up
@@ -75,19 +70,14 @@ jobs:
         
     - name: Build C++ Core
       run: |
-        mkdir cpp\build
-        cd cpp\build
-        # Use absolute path for vcpkg toolchain to avoid path issues in CI
-        $VCPKG_PATH = Join-Path $env:GITHUB_WORKSPACE "vcpkg\scripts\buildsystems\vcpkg.cmake"
-        # Verify the toolchain file exists before using it
-        if (!(Test-Path $VCPKG_PATH)) {
-          Write-Error "vcpkg toolchain file not found at $VCPKG_PATH"
-          # List contents of vcpkg directory for debugging
-          Get-ChildItem -Recurse ..\..\vcpkg\scripts\buildsystems
+        $openssl = Join-Path $env:GITHUB_WORKSPACE "vcpkg\installed\x64-windows"
+        if (!(Test-Path $openssl)) {
+          Write-Error "OpenSSL was not installed at $openssl"
           exit 1
         }
-        cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="$VCPKG_PATH" -DVCPKG_TARGET_TRIPLET=x64-windows
-        cmake --build . --config Release
+        # Ninja uses cl.exe from the MSVC developer environment.
+        cmake -S cpp -B cpp/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DOPENSSL_ROOT_DIR="$openssl" -DOPENSSL_USE_STATIC_LIBS=OFF
+        cmake --build cpp/build
         
     - name: Copy DLL to resources
       run: |
@@ -192,50 +182,10 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y cmake build-essential libssl-dev
         
-    - name: Setup vcpkg
-      run: |
-        # Always ensure vcpkg is properly set up
-        if [ ! -d "vcpkg/.git" ]; then
-          # If vcpkg directory doesn't contain git metadata, clone it
-          if [ -d "vcpkg" ]; then
-            rm -rf vcpkg
-          fi
-          git clone https://github.com/Microsoft/vcpkg.git
-        fi
-        cd vcpkg
-        # Bootstrap vcpkg if not already done
-        if [ ! -f "./vcpkg" ]; then
-          ./bootstrap-vcpkg.sh
-        fi
-        # Verify the toolchain file exists
-        if [ ! -f "scripts/buildsystems/vcpkg.cmake" ]; then
-          echo "vcpkg.cmake not found in scripts/buildsystems/"
-          exit 1
-        fi
-        echo "vcpkg toolchain file found at: $(pwd)/scripts/buildsystems/vcpkg.cmake"
-        cd ..
-        
-    - name: Install OpenSSL via vcpkg
-      run: |
-        cd vcpkg
-        ./vcpkg install openssl:x64-linux
-        cd ..
-        
     - name: Build C++ Core
       run: |
-        mkdir cpp/build
-        cd cpp/build
-        # Use absolute path for vcpkg toolchain to avoid path issues in CI
-        VCPKG_PATH="$GITHUB_WORKSPACE/vcpkg/scripts/buildsystems/vcpkg.cmake"
-        # Verify the toolchain file exists before using it
-        if [ ! -f "$VCPKG_PATH" ]; then
-          echo "vcpkg toolchain file not found at $VCPKG_PATH"
-          # List contents of vcpkg directory for debugging
-          ls -la ../../vcpkg/scripts/buildsystems/
-          exit 1
-        fi
-        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$VCPKG_PATH" -DVCPKG_TARGET_TRIPLET=x64-linux
-        cmake --build . --config Release
+        cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+        cmake --build cpp/build
         
     - name: Copy SO to resources
       run: |

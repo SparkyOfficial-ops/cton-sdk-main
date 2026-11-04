@@ -45,12 +45,9 @@ public class WalletConnectExample {
         dAppMetadata.put("description", "An example decentralized application");
         dAppMetadata.put("icons", "https://example.com/icon.png");
         
-        try {
-            String wcUri = walletConnect.createSession(dAppMetadata);
-            System.out.println("Wallet Connect URI: " + wcUri);
-        } catch (UnsupportedOperationException e) {
-            System.out.println("Session was not created: " + e.getMessage());
-        }
+        // Створюємо сесію Wallet Connect
+        String wcUri = walletConnect.createSession(dAppMetadata);
+        System.out.println("Wallet Connect URI: " + wcUri);
         
         // Симуляція запиту від dApp на отримання балансу
         System.out.println("\n--- Simulating dApp request: getBalance ---");

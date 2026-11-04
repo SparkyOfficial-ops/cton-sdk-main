@@ -42,25 +42,15 @@ public class WalletV3 extends BaseWallet {
     }
     
     @Override
-    public Cell createTransfer(Address destination, BigInteger amount, String comment) throws IOException {
-        // Wallet V3R2 виконує простий переказ як внутрішнє повідомлення (int_msg_info)
-        // з тілом op=0x0 (+ коментар). Будкуємо через стандартний конструктор BaseWallet.
-        CellBuilder bodyBuilder = new CellBuilder();
-        bodyBuilder.storeUInt(32, 0); // op code
-        if (comment != null && !comment.isEmpty()) {
-            bodyBuilder.storeBytes(comment.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        }
-        Cell body = bodyBuilder.build();
-        return buildInternalMessage(destination, amount, body, true);
+    public int getSubwalletId() throws IOException {
+        return this.subwalletId;
     }
+    
+    // createTransfer() успадковується від BaseWallet і повертає стандартне
+    // внутрішнє повідомлення (int_msg_info); повний цикл підпису — у BaseWallet.transfer().
     
     @Override
     public int getVersion() throws IOException {
         return 3;
-    }
-    
-    @Override
-    public int getSubwalletId() throws IOException {
-        return this.subwalletId;
     }
 }

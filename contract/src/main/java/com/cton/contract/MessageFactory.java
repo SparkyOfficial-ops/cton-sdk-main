@@ -38,7 +38,8 @@ public class MessageFactory {
         // Добавляем флаги (инициализируем как 0)
         // Add flags (initialize as 0)
         builder.storeUInt(1, 0); // ihr_disabled
-        builder.storeUInt(1, 1); // bounce
+        boolean bounce = destination != null && destination.isBounceable();
+        builder.storeUInt(1, bounce ? 1 : 0); // bounce
         builder.storeUInt(1, 0); // bounced
         
         // Додаємо адресу одержувача

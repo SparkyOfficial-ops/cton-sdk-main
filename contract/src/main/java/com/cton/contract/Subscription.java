@@ -97,11 +97,8 @@ public class Subscription extends Contract {
      */
     public SubscriptionInfo getSubscriptionInfo(long subscriptionId) throws IOException {
         // Виконуємо get-метод get_subscription
-        com.google.gson.JsonArray stack = new com.google.gson.JsonArray();
-        com.google.gson.JsonArray subscriptionItem = new com.google.gson.JsonArray();
-        subscriptionItem.add("num");
-        subscriptionItem.add(String.valueOf(subscriptionId));
-        stack.add(subscriptionItem);
+        com.google.gson.JsonObject stack = new com.google.gson.JsonObject();
+        stack.addProperty("subscription_id", String.valueOf(subscriptionId));
         
         com.google.gson.JsonObject result = runGetMethod("get_subscription", stack);
         
@@ -181,7 +178,7 @@ public class Subscription extends Contract {
      */
     public long getTotalSubscriptions() throws IOException {
         // Виконуємо get-метод get_total_subscriptions
-        com.google.gson.JsonArray stack = new com.google.gson.JsonArray();
+        com.google.gson.JsonObject stack = new com.google.gson.JsonObject();
         com.google.gson.JsonObject result = runGetMethod("get_total_subscriptions", stack);
         
         if (!result.has("result") || result.get("result").isJsonNull()) {

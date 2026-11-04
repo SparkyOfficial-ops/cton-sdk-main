@@ -1,0 +1,137 @@
+name: Build Native Artifacts
+
+# Збирає нативну бібліотеку cton-sdk-core (.dll/.so/.dylib) для Windows/Linux/macOS
+# та перевіряє, що Java-модулі компілюються. Артефакти завантажуються у реліз.
+#
+# Builds the native cton-sdk-core shared library for all three platforms
+# (required by the JNA bindings in com.cton.sdk) and verifies the Java modules
+# compile. Artifacts are uploaded per-OS and attached to published releases.
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  native:
+    name: Native (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact_name: cton-sdk-core-windows-x64
+            lib_name: cton-sdk-core.dll
+          - os: ubuntu-latest
+            artifact_name: cton-sdk-core-linux-x64
+            lib_name: libcton-sdk-core.so
+          - os: ubuntu-24.04-arm
+            artifact_name: cton-sdk-core-linux-arm64
+            lib_name: libcton-sdk-core.so
+          - os: macos-latest
+            artifact_name: cton-sdk-core-macos-arm64
+            lib_name: libcton-sdk-core.dylib
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---- OpenSSL per platform -------------------------------------------
+      - name: Install OpenSSL (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: Install OpenSSL (macOS)
+        if: runner.os == 'macOS'
+        run: brew install openssl@3
+
+      - name: Install OpenSSL (Windows, via vcpkg)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install openssl:x64-windows
+          echo "OPENSSL_ROOT_DIR=$env:VCPKG_ROOT/installed/x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Setup MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # ---- Configure & build the shared library ---------------------------
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          $extra = @()
+          if ("${{ runner.os }}" -eq "Windows") {
+            $extra += "-G"
+            $extra += "Ninja"
+            $extra += "-DOPENSSL_USE_STATIC_LIBS=OFF"
+          }
+          if ("${{ runner.os }}" -eq "macOS") {
+            $prefix = (brew --prefix openssl@3).Trim()
+            $extra += "-DOPENSSL_ROOT_DIR=$prefix"
+          }
+          cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release @extra
+
+      - name: Build cton-sdk-core
+        run: cmake --build cpp/build --config Release --target cton-sdk-core
+
+      - name: Locate built library
+        id: locate
+        shell: pwsh
+        run: |
+          $name = "${{ matrix.lib_name }}"
+          $found = Get-ChildItem -Path cpp/build -Recurse -Filter $name | Select-Object -First 1
+          if (-not $found) {
+            Write-Error "Expected library '$name' not found after build"
+            exit 1
+          }
+          echo "path=$($found.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ steps.locate.outputs.path }}
+          if-no-files-found: error
+
+  java:
+    name: Java modules compile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Compile (skip tests, native lib not present)
+        run: mvn -B -DskipTests compile
+
+  release:
+    name: Attach artifacts to release
+    needs: [native]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all native artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          token: ${{ secrets.GITHUB_TOKEN }}

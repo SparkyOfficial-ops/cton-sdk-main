@@ -144,7 +144,7 @@ More examples can be found in the [examples](examples/) directory.
 - GCC or Clang (Linux/macOS)
 - JDK 11 or higher
 - Maven 3.6 or higher
-- OpenSSL 4.1.0 or newer, built with Visual Studio (`no-shared`). vcpkg still ships 3.6.x, which this build rejects. Place the install tree in `../openssl-4.1.0`.
+- OpenSSL 3.6.0 (included in the project)
 
 ### Build Process
 
