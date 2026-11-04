@@ -5,11 +5,8 @@
 
 package com.cton.contract;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.math.BigInteger;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -366,62 +363,6 @@ public abstract class BaseWallet implements Wallet {
      * d1 + d2 + дані(з completion tag) + для кожного референсу 2-байтна глибина + 32-байтний хеш).
      */
     protected static byte[] cellRepresentationHash(Cell cell) {
-        return reprHashAndDepth(cell).hash;
-    }
-    
-    private static final class HashDepth {
-        final byte[] hash;
-        final int depth;
-        HashDepth(byte[] hash, int depth) {
-            this.hash = hash;
-            this.depth = depth;
-        }
-    }
-    
-    private static HashDepth reprHashAndDepth(Cell cell) {
-        int bitSize = cell.getBitSize();
-        byte[] data = cell.getData();          // ceil(bitSize/8) байтів (хвости обнулені)
-        int refsCount = cell.getRefsCount();
-        
-        // Дескриптори: d1 = refs (звичайна комірка), d2 = floor(bits/8) + ceil(bits/8)
-        int d1 = refsCount & 0x7F;
-        int d2 = (bitSize / 8) + ((bitSize + 7) / 8);
-        
-        // Копія даних із completion tag (біт 1 + нулі до байтової межі), якщо bits % 8 != 0
-        byte[] reprData = data.clone();
-        if (bitSize % 8 != 0 && reprData.length > 0) {
-            int last = reprData.length - 1;
-            int mask = 0x80 >> (bitSize % 8);
-            reprData[last] = (byte) (reprData[last] | mask);
-        }
-        
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(d1);
-        out.write(d2);
-        out.write(reprData, 0, reprData.length);
-        
-        int maxRefDepth = 0;
-        for (int i = 0; i < refsCount; i++) {
-            Cell ref = cell.getRef(i);
-            HashDepth rh = reprHashAndDepth(ref);
-            out.write((rh.depth >> 8) & 0xFF);
-            out.write(rh.depth & 0xFF);
-            out.write(rh.hash, 0, rh.hash.length);
-            if (rh.depth > maxRefDepth) {
-                maxRefDepth = rh.depth;
-            }
-        }
-        
-        byte[] hash = sha256(out.toByteArray());
-        int depth = (refsCount == 0) ? 0 : (maxRefDepth + 1);
-        return new HashDepth(hash, depth);
-    }
-    
-    private static byte[] sha256(byte[] input) {
-        try {
-            return MessageDigest.getInstance("SHA-256").digest(input);
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 algorithm not available", e);
-        }
+        return cell.representationHash();
     }
 }

@@ -35,6 +35,10 @@ public class CellBuilder {
         cell.storeUInt(bits, value);
         return this;
     }
+
+    public CellBuilder storeBit(boolean bit) {
+        return storeUInt(1, bit ? 1 : 0);
+    }
     
     /**
      * Додати знакове ціле число до комірки
