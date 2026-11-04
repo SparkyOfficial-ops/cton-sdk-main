@@ -99,7 +99,7 @@ public abstract class BaseWallet implements Wallet {
     public Cell createTransfer(Address destination, BigInteger amount, String comment) throws IOException {
         // Повертаємо стандартне внутрішнє повідомлення (TL-B int_msg_info$0),
         // яке кошелек перешле одержувачу.
-        return createInternalMessage(destination, amount, comment, true);
+        return createInternalMessage(destination, amount, comment, destination.isBounceable());
     }
     
     /**
@@ -119,8 +119,10 @@ public abstract class BaseWallet implements Wallet {
      *шелька до одержувача.
      */
     protected Cell createInternalMessage(Address destination, BigInteger amount, String comment, boolean bounce) {
-        Cell body = createMessageBody(comment);
-        
+        return createInternalMessage(destination, amount, createMessageBody(comment), bounce);
+    }
+
+    protected Cell createInternalMessage(Address destination, BigInteger amount, Cell body, boolean bounce) {
         CellBuilder msg = new CellBuilder();
         msg.storeUInt(1, 0);                       // int_msg_info$0
         msg.storeUInt(1, 1);                       // ihr_disabled = true
@@ -157,6 +159,30 @@ public abstract class BaseWallet implements Wallet {
         // Отправляем через API
         // Send through API
         apiClient.sendBoc(bocBytes);
+    }
+
+    /**
+     * Hash returned by Toncenter {@code sendBoc}. It is base64 of the external message cell hash.
+     */
+    public static String messageHash(JsonObject response) throws IOException {
+        if (response == null) {
+            throw new IOException("sendBoc returned an empty response");
+        }
+        if (response.has("ok") && !response.get("ok").isJsonNull() && !response.get("ok").getAsBoolean()) {
+            throw new IOException("sendBoc rejected the message");
+        }
+        JsonObject result = response;
+        if (response.has("result") && response.get("result").isJsonObject()) {
+            result = response.getAsJsonObject("result");
+        }
+        if (!result.has("hash") || result.get("hash").isJsonNull()) {
+            throw new IOException("sendBoc response has no message hash");
+        }
+        String hash = result.get("hash").getAsString();
+        if (hash == null || hash.isBlank()) {
+            throw new IOException("sendBoc response has no message hash");
+        }
+        return hash;
     }
     
     @Override
@@ -272,7 +298,7 @@ public abstract class BaseWallet implements Wallet {
         int sendMode = 3; // PAYABLE_FWD_FEE | DESTROY_ON_ZERO_BALANCE (стандартний простий переказ)
         
         // 2. Внутрішнє повідомлення-платеж (int_msg_info)
-        Cell internalMessage = createInternalMessage(destination, amount, comment, true);
+        Cell internalMessage = createInternalMessage(destination, amount, comment, destination.isBounceable());
         
         // 3. Тіло для підпису:
         //    signing_body = subwallet_id(32) + valid_until(32) + seqno(32) + send_mode(8) + [Order Message]

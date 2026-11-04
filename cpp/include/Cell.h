@@ -110,6 +110,24 @@ namespace cton {
          * @return true якщо спеціальна
          */
         bool isSpecial() const;
+
+        /**
+         * Child cells. The returned pointers stay owned by this cell.
+         */
+        const std::vector<std::shared_ptr<Cell>>& references() const;
+
+        /**
+         * Independent copy of the cell and every cell reachable from it.
+         * The copy does not share Cell objects with the source, so either
+         * tree can be destroyed on its own.
+         */
+        static std::shared_ptr<Cell> cloneTree(const Cell* cell);
+
+        /**
+         * Raw cell the caller deletes. Children are shared with {@code cell}
+         * and stay alive after {@code cell} itself is released.
+         */
+        static Cell* releaseCopy(const std::shared_ptr<Cell>& cell);
         
     private:
         std::vector<uint8_t> data_;
@@ -163,6 +181,12 @@ namespace cton {
          * @return посилання на себе для ланцюжкових викликів
          */
         CellBuilder& storeRef(std::shared_ptr<Cell> cell);
+
+        /**
+         * Append another cell's bits and references into this builder.
+         * Used when a dictionary leaf stores its value inline.
+         */
+        CellBuilder& appendCell(const Cell& cell);
         
         /**
          * @brief Побудувати комірку

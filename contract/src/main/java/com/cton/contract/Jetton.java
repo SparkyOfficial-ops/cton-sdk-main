@@ -10,10 +10,7 @@ import java.math.BigInteger;
 
 import com.cton.api.TonApiClient;
 import com.cton.sdk.Address;
-import com.cton.sdk.Boc;
 import com.cton.sdk.Cell;
-import com.cton.sdk.CellBuilder;
-import com.cton.sdk.Crypto;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -230,105 +227,13 @@ public class Jetton extends Contract {
     }
     
     /**
-     * Transfer jettons to another address
-     * @param fromWalletAddress адреса кошелька відправника
-     * @param toAddress адреса одержувача
-     * @param amount кількість токенів
-     * @param forwardAmount сума для пересилання разом з повідомленням
-     * @param comment коментар до переказу
-     * @param privateKey приватний ключ для підпису
-     * @throws IOException якщо сталася помилка мережі
+     * Internal message the owner's TON wallet must send to the owner's jetton wallet.
+     * The destination is resolved with {@code get_wallet_address} on this minter.
+     * {@code tonAmount} is the TON attached to that internal message.
      */
-    public void transfer(Address fromWalletAddress, Address toAddress, BigInteger amount, 
-                        BigInteger forwardAmount, String comment, Crypto.PrivateKey privateKey) throws IOException {
-        // Створюємо комірку з тілом повідомлення для переказу jetton
-        // Создаем ячейку с телом сообщения для перевода jetton
-        // Create cell with message body for jetton transfer
-        CellBuilder bodyBuilder = new CellBuilder();
-        
-        // Додаємо opcode для transfer (0xf8a7ea5)
-        // Добавляем opcode для transfer (0xf8a7ea5)
-        // Add opcode for transfer (0xf8a7ea5)
-        bodyBuilder.storeUInt(32, 0xf8a7ea5);
-        
-        // Додаємо query_id (0 для простоти)
-        // Добавляем query_id (0 для простоты)
-        // Add query_id (0 for simplicity)
-        bodyBuilder.storeUInt(64, 0);
-        
-        // Додаємо кількість токенів
-        // Добавляем количество токенов
-        // Add token amount
-        bodyBuilder.storeCoins(amount);
-        
-        // Додаємо адресу одержувача
-        // Добавляем адрес получателя
-        // Add recipient address
-        bodyBuilder.storeAddress(toAddress);
-        
-        // Додаємо адресу відправника (response destination)
-        // Добавляем адрес отправителя (response destination)
-        // Add sender address (response destination)
-        bodyBuilder.storeAddress(fromWalletAddress);
-        
-        // Додаємо прапор custom_payload (0 - немає)
-        // Добавляем флаг custom_payload (0 - нет)
-        // Add custom_payload flag (0 - none)
-        bodyBuilder.storeUInt(1, 0); // Використовуємо storeUInt(1, 0) замість storeBit(false)
-        
-        // Додаємо forward_amount
-        // Добавляем forward_amount
-        // Add forward_amount
-        bodyBuilder.storeCoins(forwardAmount);
-        
-        // Додаємо прапор forward_payload (0 - немає)
-        // Добавляем флаг forward_payload (0 - нет)
-        // Add forward_payload flag (0 - none)
-        bodyBuilder.storeUInt(1, 0); // Використовуємо storeUInt(1, 0) замість storeBit(false)
-        
-        // Якщо є коментар, додаємо його
-        // Если есть комментарий, добавляем его
-        // If there's a comment, add it
-        if (comment != null && !comment.isEmpty()) {
-            CellBuilder commentBuilder = new CellBuilder();
-            commentBuilder.storeUInt(32, 0); // opcode для коментаря
-            commentBuilder.storeBytes(comment.getBytes());
-            bodyBuilder.storeRef(commentBuilder.build());
-        }
-        
-        Cell body = bodyBuilder.build();
-        
-        // Створюємо зовнішнє повідомлення
-        // Создаем внешнее сообщение
-        // Create external message
-        CellBuilder messageBuilder = new CellBuilder();
-        
-        // Створюємо BOC для повідомлення
-        // Создаем BOC для сообщения
-        // Create BOC for message
-        Boc boc = new Boc(body);
-        byte[] messageBytes = boc.serialize(true, true);
-        
-        // Підписуємо повідомлення приватним ключем
-        // Подписываем сообщение приватным ключом
-        // Sign message with private key
-        byte[] signature = Crypto.sign(privateKey, messageBytes);
-        
-        // Створюємо зовнішнє повідомлення з підписом
-        // Создаем внешнее сообщение с подписью
-        // Create external message with signature
-        messageBuilder.storeBytes(signature);
-        messageBuilder.storeRef(body);
-        
-        Cell message = messageBuilder.build();
-        
-        // Надсилаємо повідомлення через API
-        // Отправляем сообщение через API
-        // Send message through API
-        if (apiClient != null) {
-            apiClient.sendBoc(messageBytes);
-        } else {
-            throw new IOException("API client not set");
-        }
+    public Cell transfer(Address owner, Address recipient, BigInteger jettonAmount,
+                         BigInteger tonAmount, BigInteger forwardAmount, String comment) throws IOException {
+        return JettonWallet.ofOwner(this, owner).createInternalTransfer(
+                owner, recipient, jettonAmount, tonAmount, forwardAmount, comment, true);
     }
 }

@@ -95,6 +95,8 @@ public class Crypto {
         // ChaCha20 encryption
         Pointer crypto_chacha20_encrypt(byte[] data, int dataLen, byte[] key, byte[] nonce);
         
+        void cton_free(Pointer ptr);
+
         // Функція для звільнення пам'яті рядків
         void free_string(Pointer str);
         
@@ -475,11 +477,7 @@ public class Crypto {
             byte[] result = resultPtr.getByteArray(0, data.length);
             
             // Free the memory allocated in C++
-            try {
-                Native.free(Pointer.nativeValue(resultPtr));
-            } catch (Exception e) {
-                // Ignore errors during memory freeing
-            }
+            CtonLibrary.INSTANCE.cton_free(resultPtr);
             
             return result;
         }
@@ -504,7 +502,7 @@ public class Crypto {
             // Convert Pointer to byte[]
             byte[] signature = signaturePtr.getByteArray(0, 64);
             // Free memory allocated in C++
-            Native.free(Pointer.nativeValue(signaturePtr));
+            CtonLibrary.INSTANCE.cton_free(signaturePtr);
             return signature;
         } else {
             // У випадку помилки повертаємо порожній масив
@@ -547,7 +545,7 @@ public class Crypto {
             // Convert Pointer to byte[]
             byte[] signature = signaturePtr.getByteArray(0, 64);
             // Free memory allocated in C++
-            Native.free(Pointer.nativeValue(signaturePtr));
+            CtonLibrary.INSTANCE.cton_free(signaturePtr);
             return signature;
         } else {
             // У випадку помилки повертаємо порожній масив

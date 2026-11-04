@@ -1,8 +1,3 @@
-// HardwareWallet.java - підтримка апаратних кошельків (Ledger тощо)
-// Author: Андрій Будильников (Sparky)
-// Hardware wallet support (Ledger, etc.)
-// Поддержка аппаратных кошельков (Ledger и т.д.)
-
 package com.cton.contract;
 
 import java.io.IOException;
@@ -11,179 +6,124 @@ import java.util.List;
 
 import com.cton.api.TonApiClient;
 import com.cton.sdk.Address;
+import com.cton.sdk.Boc;
 import com.cton.sdk.Cell;
+import com.cton.sdk.CellBuilder;
 
 /**
- * Підтримка апаратних кошельків для TON блокчейну
- * 
- * Hardware wallet support for TON blockchain
- * Поддержка аппаратных кошельков для TON блокчейна
+ * Ledger account. Signing goes through a caller-supplied {@link LedgerTransport}
+ * and the APDU layout in {@link LedgerApdu}. There is no simulated device.
  */
 public class HardwareWallet extends BaseWallet {
     private final String deviceType;
     private final String deviceId;
     private final int accountIndex;
-    
-    /**
-     * Конструктор апаратного кошелька
-     * @param address адреса кошелька
-     * @param apiClient API клієнт для взаємодії з мережею
-     * @param deviceType тип пристрою (наприклад, "Ledger")
-     * @param deviceId ідентифікатор пристрою
-     * @param accountIndex індекс облікового запису
-     */
-    public HardwareWallet(Address address, TonApiClient apiClient, String deviceType, 
-                         String deviceId, int accountIndex) {
+    private LedgerTransport transport;
+
+    public HardwareWallet(Address address, TonApiClient apiClient, String deviceType,
+                          String deviceId, int accountIndex) {
         super(address, apiClient);
         this.deviceType = deviceType;
         this.deviceId = deviceId;
         this.accountIndex = accountIndex;
     }
-    
-    /**
-     * Конструктор апаратного кошелька зі значенням accountIndex за замовчуванням
-     * @param address адреса кошелька
-     * @param apiClient API клієнт для взаємодії з мережею
-     * @param deviceType тип пристрою (наприклад, "Ledger")
-     * @param deviceId ідентифікатор пристрою
-     */
-    public HardwareWallet(Address address, TonApiClient apiClient, String deviceType, 
-                         String deviceId) {
+
+    public HardwareWallet(Address address, TonApiClient apiClient, String deviceType, String deviceId) {
         this(address, apiClient, deviceType, deviceId, 0);
     }
-    
+
+    public void setTransport(LedgerTransport transport) {
+        this.transport = transport;
+    }
+
     @Override
     public Cell createTransfer(Address destination, BigInteger amount, String comment) throws IOException {
-        // Створюємо звичайну транзакцію
-        Cell transaction = super.createTransfer(destination, amount, comment);
-        
-        // Для апаратного кошелька додаємо спеціальні маркери
-        // For hardware wallet, add special markers
-        // Для аппаратного кошелька добавляем специальные маркеры
-        
-        return transaction;
+        return super.createTransfer(destination, amount, comment);
     }
-    
+
     /**
-     * Підписати транзакцію на апаратному пристрої
-     * @param transaction транзакція для підпису
-     * @return підписана транзакція
-     * @throws IOException якщо сталася помилка
+     * Asks the Ledger to sign the transaction BOC and returns {@code signature || ^transaction}.
      */
     public Cell signTransactionOnDevice(Cell transaction) throws IOException {
-        // У реальній реалізації тут має бути взаємодія з апаратним пристроєм
-        // For real implementation, this would interact with the hardware device
-        // В реальной реализации здесь должно быть взаимодействие с аппаратным устройством
-        
-        // Симуляція підпису на апаратному пристрої
-        // Simulation of signing on hardware device
-        // Симуляция подписи на аппаратном устройстве
-        
-        System.out.println("Please confirm transaction on your " + deviceType + " device...");
-        
-        // У реальній реалізації тут має бути очікування підтвердження користувача
-        // For real implementation, this would wait for user confirmation
-        // В реальной реализации здесь должно быть ожидание подтверждения пользователя
-        
-        try {
-            Thread.sleep(1000); // Імітація очікування / Simulation of waiting
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+        byte[] bocBytes;
+        try (Boc boc = new Boc(transaction)) {
+            bocBytes = boc.serialize(true, true);
         }
-        
-        System.out.println("Transaction confirmed on " + deviceType + " device");
-        
-        return transaction;
+        if (bocBytes.length > 255) {
+            throw new IOException("transaction BOC does not fit in one Ledger APDU");
+        }
+        byte[] apdu = LedgerApdu.command(
+                LedgerApdu.INS_SIGN_TRANSACTION, accountIndex & 0xFF, 0, bocBytes);
+        byte[] signature = exchange(apdu);
+        if (signature.length != 64) {
+            throw new IOException("Ledger signature must be 64 bytes, got " + signature.length);
+        }
+        return new CellBuilder().storeBytes(signature).storeRef(transaction).build();
     }
-    
+
     /**
-     * Отримати адресу з апаратного пристрою
-     * @return адреса кошелька
-     * @throws IOException якщо сталася помилка
+     * Reads the account address from the device. The response payload is
+     * {@code workchain:int8 || account:bytes32} after any leading public key
+     * when the payload is longer than 33 bytes.
      */
     public Address getAddressFromDevice() throws IOException {
-        // У реальній реалізації тут має бути отримання адреси з апаратного пристрою
-        // For real implementation, this would get address from hardware device
-        // В реальной реализации здесь должно быть получение адреса с аппаратного устройства
-        
-        System.out.println("Please confirm address request on your " + deviceType + " device...");
-        
-        // У реальній реалізації тут має бути очікування підтвердження користувача
-        // For real implementation, this would wait for user confirmation
-        // В реальной реализации здесь должно быть ожидание подтверждения пользователя
-        
-        return getAddress();
+        byte[] apdu = LedgerApdu.command(LedgerApdu.INS_GET_ADDRESS, accountIndex & 0xFF, 0, null);
+        byte[] data = exchange(apdu);
+        if (data.length < 33) {
+            throw new IOException("Ledger address response is " + data.length + " bytes");
+        }
+        int hashAt = data.length - 32;
+        byte workchain = data[hashAt - 1];
+        byte[] hash = new byte[32];
+        System.arraycopy(data, hashAt, hash, 0, 32);
+        Address address = new Address();
+        address.setWorkchain(workchain);
+        address.setHashPart(hash);
+        return address;
     }
-    
-    /**
-     * Отримати баланс з апаратного пристрою
-     * @return баланс у нанотоні
-     * @throws IOException якщо сталася помилка мережі
-     */
+
     @Override
     public BigInteger getBalance() throws IOException {
-        // Для апаратного кошелька можемо додати додаткову перевірку
-        // For hardware wallet, we can add additional verification
-        // Для аппаратного кошелька можем добавить дополнительную проверку
-        
-        System.out.println("Getting balance for " + deviceType + " wallet...");
         return super.getBalance();
     }
-    
-    /**
-     * Отримати тип пристрою
-     * @return тип пристрою
-     */
+
     public String getDeviceType() {
         return deviceType;
     }
-    
-    /**
-     * Отримати ідентифікатор пристрою
-     * @return ідентифікатор пристрою
-     */
+
     public String getDeviceId() {
         return deviceId;
     }
-    
-    /**
-     * Отримати індекс облікового запису
-     * @return індекс облікового запису
-     */
+
     public int getAccountIndex() {
         return accountIndex;
     }
-    
+
     @Override
     public int getVersion() throws IOException {
-        return 200; // Версія для апаратного кошелька
+        byte[] data = exchange(LedgerApdu.command(LedgerApdu.INS_GET_APP_CONFIGURATION, 0, 0, null));
+        if (data.length < 1) {
+            throw new IOException("Ledger version response is empty");
+        }
+        return data[0] & 0xFF;
     }
-    
-    /**
-     * Перевірити підключення пристрою
-     * @return true якщо пристрій підключено, false в іншому випадку
-     */
+
     public boolean isDeviceConnected() {
-        // У реальній реалізації тут має бути перевірка підключення пристрою
-        // For real implementation, this would check device connection
-        // В реальной реализации здесь должна быть проверка подключения устройства
-        
-        // Симуляція підключення пристрою
-        // Simulation of device connection
-        // Симуляция подключения устройства
-        
-        return true;
+        return transport != null && transport.isOpen();
     }
-    
-    /**
-     * Отримати список підтримуваних пристроїв
-     * @return список підтримуваних пристроїв
-     */
+
     public static List<String> getSupportedDevices() {
-        // У реальній реалізації тут має бути список підтримуваних пристроїв
-        // For real implementation, this would be a list of supported devices
-        // В реальной реализации здесь должен быть список поддерживаемых устройств
-        
-        return List.of("Ledger", "Trezor", "Keystone");
+        return List.of("Ledger");
+    }
+
+    private byte[] exchange(byte[] apdu) throws IOException {
+        if (!"Ledger".equals(deviceType)) {
+            throw new IOException("APDU exchange is implemented for Ledger only");
+        }
+        if (transport == null || !transport.isOpen()) {
+            throw new IOException("Ledger transport is not open");
+        }
+        byte[] response = transport.exchange(apdu);
+        return LedgerApdu.payload(response);
     }
 }

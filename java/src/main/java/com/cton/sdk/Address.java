@@ -4,6 +4,7 @@
 package com.cton.sdk;
 
 import java.io.Closeable;
+import java.util.Base64;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
@@ -60,11 +61,14 @@ public class Address implements Closeable {
     // Сделаем поле доступным для других классов в том же пакете
     Pointer nativeAddress;
     private boolean closed = false;
+    /** Send hint. Raw {@code workchain:hex} has no flag and stays bounceable. */
+    private final boolean bounceable;
     
     /**
      * Конструктор за замовчуванням
      */
     public Address() {
+        this.bounceable = true;
         this.nativeAddress = CtonLibrary.INSTANCE.address_create();
     }
     
@@ -74,6 +78,7 @@ public class Address implements Closeable {
      * Конструктор для внутреннего использования (для других классов в том же пакете)
      */
     Address(Pointer nativeAddress) {
+        this.bounceable = true;
         this.nativeAddress = nativeAddress;
     }
     
@@ -82,9 +87,40 @@ public class Address implements Closeable {
      * @param addressStr рядок з адресою
      */
     public Address(String addressStr) {
+        this.bounceable = bounceableFrom(addressStr);
         this.nativeAddress = CtonLibrary.INSTANCE.address_create_from_string(addressStr);
         if (this.nativeAddress == null) {
             throw new IllegalArgumentException("Invalid address string: " + addressStr);
+        }
+    }
+
+    /**
+     * Bounceable flag of the text form. {@code UQ} / {@code 0Q} (tag bit {@code 0x40}) are
+     * non-bounceable. Raw {@code workchain:hex} has no such bit and is bounceable, which makes
+     * an inactive wallet reject the transfer.
+     */
+    public boolean isBounceable() {
+        return bounceable;
+    }
+
+    static boolean bounceableFrom(String address) {
+        if (address == null) {
+            return true;
+        }
+        String value = address.trim();
+        if (value.isEmpty() || value.indexOf(':') >= 0) {
+            return true;
+        }
+        try {
+            String url = value.replace('+', '-').replace('/', '_');
+            int pad = (4 - url.length() % 4) % 4;
+            byte[] decoded = Base64.getUrlDecoder().decode(url + "=".repeat(pad));
+            if (decoded.length < 1) {
+                return true;
+            }
+            return (decoded[0] & 0x40) == 0;
+        } catch (IllegalArgumentException e) {
+            return true;
         }
     }
     

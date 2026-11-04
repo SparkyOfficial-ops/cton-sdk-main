@@ -42,8 +42,12 @@ target_include_directories(cton-sdk-core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Find OpenSSL with more flexible options
-set(OPENSSL_USE_STATIC_LIBS TRUE)
+# Shared OpenSSL is the default. Ubuntu libssl-dev and the vcpkg x64-windows
+# triplet ship shared libraries; forcing static makes find_package fail.
+# OpenSSL 3.x is enough. Do not require a 4.x that the runners do not have.
+if(NOT DEFINED OPENSSL_USE_STATIC_LIBS)
+    set(OPENSSL_USE_STATIC_LIBS OFF)
+endif()
 
 # First try to find OpenSSL in the project directory
 if(EXISTS "${CMAKE_SOURCE_DIR}/../openssl")
@@ -66,10 +70,10 @@ if(NOT OpenSSL_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/../vcpkg/installed/x64-wind
     find_package(OpenSSL QUIET)
 endif()
 
-# If still not found, try system locations
+# If still not found, use OpenSSL 3 from the system or OPENSSL_ROOT_DIR.
 if(NOT OpenSSL_FOUND)
-    message(STATUS "Looking for OpenSSL in system locations")
-    find_package(OpenSSL QUIET)
+    message(STATUS "Looking for OpenSSL 3 in system locations")
+    find_package(OpenSSL 3 REQUIRED)
 endif()
 
 # Link OpenSSL libraries

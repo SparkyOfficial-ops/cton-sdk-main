@@ -59,8 +59,9 @@ public class WalletConnectTest {
         String sessionUri = walletConnect.createSession(dAppMetadata);
         
         assertNotNull(sessionUri);
-        assertTrue(sessionUri.startsWith("wc:"));
-        assertTrue(sessionUri.contains("@1?bridge="));
+        assertTrue(sessionUri.startsWith("tc://?v=2&id="));
+        assertTrue(sessionUri.contains("&r="));
+        assertTrue(sessionUri.contains("bridge.tonapi.io"));
     }
     
     @Test

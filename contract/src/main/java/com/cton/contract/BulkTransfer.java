@@ -8,6 +8,7 @@ package com.cton.contract;
 import java.math.BigInteger;
 
 import com.cton.sdk.Address;
+import com.cton.sdk.Cell;
 
 /**
  * Представляє одну транзакцію в багатотранзакційному переказі
@@ -20,7 +21,38 @@ public class BulkTransfer {
     private final BigInteger amount;
     private final String comment;
     private final int mode;
+    private final boolean bounce;
+    private final Cell body;
     
+    /**
+     * Конструктор
+     * @param destination адреса одержувача
+     * @param amount сума в нанотоні
+     * @param comment коментар (необов'язково)
+     * @param mode режим транзакції
+     * @param bounce {@code false} для виплати на гаманець, який може бути ще не активований
+     */
+    public BulkTransfer(Address destination, BigInteger amount, String comment, int mode, boolean bounce) {
+        this(destination, amount, comment, mode, bounce, null);
+    }
+
+    /**
+     * @param body готовое тело внутреннего сообщения, например Jetton {@code transfer}
+     * @param amount прикреплённые наноTON (газ), не сумма токена
+     */
+    public BulkTransfer(Address destination, BigInteger amount, Cell body, int mode, boolean bounce) {
+        this(destination, amount, null, mode, bounce, body);
+    }
+
+    private BulkTransfer(Address destination, BigInteger amount, String comment, int mode, boolean bounce, Cell body) {
+        this.destination = destination;
+        this.amount = amount;
+        this.comment = comment;
+        this.mode = mode;
+        this.bounce = bounce;
+        this.body = body;
+    }
+
     /**
      * Конструктор
      * @param destination адреса одержувача
@@ -29,10 +61,7 @@ public class BulkTransfer {
      * @param mode режим транзакції
      */
     public BulkTransfer(Address destination, BigInteger amount, String comment, int mode) {
-        this.destination = destination;
-        this.amount = amount;
-        this.comment = comment;
-        this.mode = mode;
+        this(destination, amount, comment, mode, destination != null && destination.isBounceable());
     }
     
     /**
@@ -71,5 +100,19 @@ public class BulkTransfer {
     
     public int getMode() {
         return mode;
+    }
+
+    /**
+     * @return {@code false} when the transfer must not bounce (non-bounceable, {@code UQ} / {@code 0Q})
+     */
+    public boolean isBounce() {
+        return bounce;
+    }
+
+    /**
+     * @return тело сообщения, если оно задано вместо текстового комментария
+     */
+    public Cell getBody() {
+        return body;
     }
 }

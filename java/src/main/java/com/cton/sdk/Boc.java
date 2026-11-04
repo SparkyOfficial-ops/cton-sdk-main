@@ -44,6 +44,9 @@ public class Boc implements Closeable {
         // Встановити кореневу комірку
         void boc_set_root(Pointer boc, Pointer rootCell);
         
+        // malloc from this library is released by cton_free, not by the JVM runtime
+        void cton_free(Pointer ptr);
+
         // Функція для звільнення пам'яті
         void free_string(Pointer str);
     }
@@ -99,8 +102,8 @@ public class Boc implements Closeable {
         // Конвертуємо Pointer в byte[]
         byte[] result = dataPtr.getByteArray(0, size);
         
-        // Звільняємо пам'ять, виділену в C++
-        Native.free(Pointer.nativeValue(dataPtr));
+        // The buffer was allocated inside the native library.
+        CtonLibrary.INSTANCE.cton_free(dataPtr);
         
         return result;
     }

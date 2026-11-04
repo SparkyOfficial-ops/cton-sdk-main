@@ -5,12 +5,14 @@
 
 package com.cton.contract;
 
+import java.io.IOException;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,7 +86,7 @@ public class HardwareWalletTest {
             "device_12345"
         );
         
-        assertEquals(200, hardwareWallet.getVersion());
+        assertThrows(IOException.class, hardwareWallet::getVersion);
     }
     
     @Test
@@ -100,7 +102,7 @@ public class HardwareWalletTest {
             "device_12345"
         );
         
-        assertTrue(hardwareWallet.isDeviceConnected());
+        assertFalse(hardwareWallet.isDeviceConnected());
     }
     
     @Test
@@ -113,9 +115,7 @@ public class HardwareWalletTest {
         
         assertNotNull(supportedDevices);
         assertFalse(supportedDevices.isEmpty());
-        assertTrue(supportedDevices.contains("Ledger"));
-        assertTrue(supportedDevices.contains("Trezor"));
-        assertTrue(supportedDevices.contains("Keystone"));
+        assertEquals(List.of("Ledger"), supportedDevices);
     }
     
     @Test
@@ -180,9 +180,7 @@ public class HardwareWalletTest {
             "device_12345"
         );
         
-        Address address = hardwareWallet.getAddressFromDevice();
-        assertNotNull(address);
-        assertSame(walletAddress, address);
+        assertThrows(IOException.class, hardwareWallet::getAddressFromDevice);
     }
     
     @Test
@@ -204,5 +202,14 @@ public class HardwareWalletTest {
         com.cton.sdk.Cell transaction = hardwareWallet.createTransfer(destination, amount, "Test transfer");
         
         assertNotNull(transaction);
+    }
+
+    @Test
+    public void testLedgerApduFraming() {
+        byte[] apdu = LedgerApdu.command(LedgerApdu.INS_GET_ADDRESS, 0, 0, new byte[] {0x01, 0x02});
+        assertArrayEquals(new byte[] {(byte) 0xE0, 0x04, 0x00, 0x00, 0x02, 0x01, 0x02}, apdu);
+        byte[] response = new byte[] {0x0A, (byte) 0x90, 0x00};
+        assertEquals(LedgerApdu.SW_OK, LedgerApdu.statusWord(response));
+        assertArrayEquals(new byte[] {0x0A}, LedgerApdu.payload(response));
     }
 }

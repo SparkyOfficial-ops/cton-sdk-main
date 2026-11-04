@@ -1,82 +1,74 @@
-// WalletConnect.java - інтеграція Wallet Connect для взаємодії з dApp
-// Author: Андрій Будильников (Sparky)
-// Wallet Connect integration for dApp interaction
-// Интеграция Wallet Connect для взаимодействия с dApp
-
 package com.cton.contract;
 
 import java.io.IOException;
 import java.math.BigInteger;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 import com.cton.sdk.Address;
 import com.cton.sdk.Cell;
 import com.cton.sdk.Crypto;
+import com.cton.sdk.SessionCrypto;
 
 /**
- * Інтеграція Wallet Connect для взаємодії з dApp
- * 
- * Wallet Connect integration for dApp interaction
- * Интеграция Wallet Connect для взаимодействия с dApp
+ * TON Connect 2 session. The session id is the hex X25519 public key.
+ * {@code ton_sign} is signed with the caller's private key. There is no
+ * placeholder signature.
  */
 public class WalletConnect {
     private final Wallet wallet;
-    private final String sessionId;
+    private final SessionCrypto session;
+    private final TonConnectBridge bridge;
     private final Map<String, WalletConnectRequest> pendingRequests;
-    
-    /**
-     * Конструктор Wallet Connect
-     * @param wallet кошик для взаємодії
-     */
+
     public WalletConnect(Wallet wallet) {
+        this(wallet, new SessionCrypto(), new TonConnectBridge());
+    }
+
+    public WalletConnect(Wallet wallet, SessionCrypto session, TonConnectBridge bridge) {
+        if (wallet == null || session == null || bridge == null) {
+            throw new IllegalArgumentException("wallet, session and bridge are required");
+        }
         this.wallet = wallet;
-        this.sessionId = UUID.randomUUID().toString();
+        this.session = session;
+        this.bridge = bridge;
         this.pendingRequests = new HashMap<>();
     }
-    
-    /**
-     * Створити сесію Wallet Connect
-     * @param dAppMetadata метадані dApp
-     * @return URI для підключення
-     */
+
     public String createSession(Map<String, String> dAppMetadata) {
-        // У реальній реалізації тут має бути створення URI для Wallet Connect
-        // For real implementation, this would create a Wallet Connect URI
-        // В реальной реализации здесь должно быть создание URI для Wallet Connect
-        
-        return "wc:" + sessionId + "@1?bridge=https://bridge.walletconnect.org&key=" + generateRandomKey();
+        String manifest = "";
+        if (dAppMetadata != null) {
+            manifest = dAppMetadata.getOrDefault("manifestUrl", dAppMetadata.getOrDefault("url", ""));
+        }
+        String request = "{\"manifestUrl\":\"" + escape(manifest) + "\",\"items\":[{\"name\":\"ton_addr\"}]}";
+        String encoded = URLEncoder.encode(request, StandardCharsets.UTF_8);
+        return "tc://?v=2&id=" + session.clientId() + "&r=" + encoded + "&bridge=" +
+                URLEncoder.encode(bridge.url(), StandardCharsets.UTF_8);
     }
-    
-    /**
-     * Обробити запит від dApp
-     * @param requestId ідентифікатор запиту
-     * @param requestType тип запиту
-     * @param params параметри запиту
-     * @return результат обробки запиту
-     */
+
+    public void sendEncrypted(String toClientId, byte[] receiverPublicKey, String json, int ttlSeconds) throws IOException {
+        String body = session.encrypt(json.getBytes(StandardCharsets.UTF_8), receiverPublicKey);
+        bridge.send(session.clientId(), toClientId, body, ttlSeconds);
+    }
+
     public WalletConnectResponse handleRequest(String requestId, String requestType, Map<String, Object> params) {
         WalletConnectRequest request = new WalletConnectRequest(requestId, requestType, params);
         pendingRequests.put(requestId, request);
-        
         switch (requestType) {
             case "ton_getBalance":
                 return handleGetBalanceRequest(request);
             case "ton_sendTransaction":
                 return handleSendTransactionRequest(request);
             case "ton_sign":
-                return handleSignRequest(request);
+                return new WalletConnectResponse(requestId, false,
+                        "signature requires approveRequest with a private key", null);
             default:
                 return new WalletConnectResponse(requestId, false, "Unsupported request type: " + requestType, null);
         }
     }
-    
-    /**
-     * Обробити запит на отримання балансу
-     * @param request запит
-     * @return відповідь
-     */
+
     private WalletConnectResponse handleGetBalanceRequest(WalletConnectRequest request) {
         try {
             BigInteger balance = wallet.getBalance();
@@ -87,185 +79,139 @@ public class WalletConnect {
             return new WalletConnectResponse(request.getId(), false, "Failed to get balance: " + e.getMessage(), null);
         }
     }
-    
-    /**
-     * Обробити запит на відправку транзакції
-     * @param request запит
-     * @return відповідь
-     */
+
     private WalletConnectResponse handleSendTransactionRequest(WalletConnectRequest request) {
         try {
             Map<String, Object> params = request.getParams();
-            
-            // Отримуємо параметри транзакції
             String toAddress = (String) params.get("to");
             String amountStr = (String) params.get("amount");
             String comment = (String) params.get("comment");
-            
             Address destination = new Address(toAddress);
             BigInteger amount = new BigInteger(amountStr);
-            
-            // Створюємо транзакцію
             Cell transaction = wallet.createTransfer(destination, amount, comment);
-            
-            // У реальній реалізації тут має бути підпис транзакції та її відправка
-            // For real implementation, this would sign and send the transaction
-            // В реальной реализации здесь должна быть подпись транзакции и её отправка
-            
             Map<String, Object> result = new HashMap<>();
-            result.put("status", "Transaction created (not sent in this example)");
-            result.put("transaction", transaction.toString());
-            
+            result.put("status", "transaction cell is ready for the wallet signature");
+            result.put("bits", transaction.getBitSize());
             return new WalletConnectResponse(request.getId(), true, null, result);
         } catch (Exception e) {
             return new WalletConnectResponse(request.getId(), false, "Failed to create transaction: " + e.getMessage(), null);
         }
     }
-    
-    /**
-     * Обробити запит на підпис
-     * @param request запит
-     * @return відповідь
-     */
-    private WalletConnectResponse handleSignRequest(WalletConnectRequest request) {
-        try {
-            Map<String, Object> params = request.getParams();
-            String dataToSign = (String) params.get("data");
-            
-            // У реальній реалізації тут має бути підпис даних
-            // For real implementation, this would sign the data
-            // В реальной реализации здесь должна быть подпись данных
-            
-            Map<String, Object> result = new HashMap<>();
-            result.put("signature", "signature_placeholder");
-            result.put("data", dataToSign);
-            
-            return new WalletConnectResponse(request.getId(), true, null, result);
-        } catch (Exception e) {
-            return new WalletConnectResponse(request.getId(), false, "Failed to sign data: " + e.getMessage(), null);
-        }
-    }
-    
-    /**
-     * Підтвердити запит
-     * @param requestId ідентифікатор запиту
-     * @param privateKey приватний ключ для підпису
-     * @return відповідь
-     */
+
     public WalletConnectResponse approveRequest(String requestId, Crypto.PrivateKey privateKey) {
         WalletConnectRequest request = pendingRequests.get(requestId);
         if (request == null) {
             return new WalletConnectResponse(requestId, false, "Request not found", null);
         }
-        
-        // У реальній реалізації тут має бути підпис запиту приватним ключем
-        // For real implementation, this would sign the request with private key
-        // В реальной реализации здесь должна быть подпись запроса приватным ключом
-        
         pendingRequests.remove(requestId);
+        if ("ton_sign".equals(request.getType())) {
+            if (privateKey == null) {
+                return new WalletConnectResponse(requestId, false, "private key is required to sign", null);
+            }
+            Object data = request.getParams() == null ? null : request.getParams().get("data");
+            if (!(data instanceof String) || ((String) data).isEmpty()) {
+                return new WalletConnectResponse(requestId, false, "sign request has no data", null);
+            }
+            byte[] signature = Crypto.sign(privateKey, ((String) data).getBytes(StandardCharsets.UTF_8));
+            if (signature.length != 64) {
+                return new WalletConnectResponse(requestId, false, "signature must be 64 bytes", null);
+            }
+            Map<String, Object> result = new HashMap<>();
+            result.put("signature", hex(signature));
+            return new WalletConnectResponse(requestId, true, null, result);
+        }
         return new WalletConnectResponse(requestId, true, null, Map.of("status", "approved"));
     }
-    
-    /**
-     * Відхилити запит
-     * @param requestId ідентифікатор запиту
-     * @return відповідь
-     */
+
     public WalletConnectResponse rejectRequest(String requestId) {
         WalletConnectRequest request = pendingRequests.get(requestId);
         if (request == null) {
             return new WalletConnectResponse(requestId, false, "Request not found", null);
         }
-        
         pendingRequests.remove(requestId);
         return new WalletConnectResponse(requestId, true, null, Map.of("status", "rejected"));
     }
-    
-    /**
-     * Закрити сесію
-     */
+
     public void disconnect() {
         pendingRequests.clear();
-        // У реальній реалізації тут має бути закриття сесії Wallet Connect
-        // For real implementation, this would close the Wallet Connect session
-        // В реальной реализации здесь должно быть закрытие сессии Wallet Connect
     }
-    
-    /**
-     * Отримати ідентифікатор сесії
-     * @return ідентифікатор сесії
-     */
+
     public String getSessionId() {
-        return sessionId;
+        return session.clientId();
     }
-    
-    /**
-     * Згенерувати випадковий ключ (для прикладу)
-     * @return випадковий ключ
-     */
-    private String generateRandomKey() {
-        // У реальній реалізації тут має бути генерація справжнього криптографічного ключа
-        // For real implementation, this would generate a real cryptographic key
-        // В реальной реализации здесь должна быть генерация настоящего криптографического ключа
-        
-        return "random_key_for_example";
+
+    public SessionCrypto session() {
+        return session;
     }
-    
-    /**
-     * Внутрішній клас для представлення запиту Wallet Connect
-     */
+
+    public TonConnectBridge bridge() {
+        return bridge;
+    }
+
+    private static String escape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
+    private static String hex(byte[] bytes) {
+        char[] digits = new char[bytes.length * 2];
+        char[] alphabet = "0123456789abcdef".toCharArray();
+        for (int i = 0; i < bytes.length; i++) {
+            int value = bytes[i] & 0xFF;
+            digits[i * 2] = alphabet[value >>> 4];
+            digits[i * 2 + 1] = alphabet[value & 0x0F];
+        }
+        return new String(digits);
+    }
+
     public static class WalletConnectRequest {
         private final String id;
         private final String type;
         private final Map<String, Object> params;
-        
+
         public WalletConnectRequest(String id, String type, Map<String, Object> params) {
             this.id = id;
             this.type = type;
             this.params = params;
         }
-        
+
         public String getId() {
             return id;
         }
-        
+
         public String getType() {
             return type;
         }
-        
+
         public Map<String, Object> getParams() {
             return params;
         }
     }
-    
-    /**
-     * Внутрішній клас для представлення відповіді Wallet Connect
-     */
+
     public static class WalletConnectResponse {
         private final String id;
         private final boolean success;
         private final String error;
         private final Map<String, Object> result;
-        
+
         public WalletConnectResponse(String id, boolean success, String error, Map<String, Object> result) {
             this.id = id;
             this.success = success;
             this.error = error;
             this.result = result;
         }
-        
+
         public String getId() {
             return id;
         }
-        
+
         public boolean isSuccess() {
             return success;
         }
-        
+
         public String getError() {
             return error;
         }
-        
+
         public Map<String, Object> getResult() {
             return result;
         }

@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <cstring>
 #include <sstream>
+#include <unordered_map>
+#include <algorithm>
+#include <functional>
 
 namespace cton {
     
@@ -125,6 +128,47 @@ namespace cton {
     bool Cell::isSpecial() const {
         return isSpecial_;
     }
+
+    const std::vector<std::shared_ptr<Cell>>& Cell::references() const {
+        return references_;
+    }
+
+    std::shared_ptr<Cell> Cell::cloneTree(const Cell* cell) {
+        if (!cell) {
+            throw std::invalid_argument("Cannot clone a null cell");
+        }
+        std::unordered_map<const Cell*, std::shared_ptr<Cell>> seen;
+        std::function<std::shared_ptr<Cell>(const Cell*)> copy =
+            [&](const Cell* node) -> std::shared_ptr<Cell> {
+                auto found = seen.find(node);
+                if (found != seen.end()) {
+                    return found->second;
+                }
+                auto shell = std::shared_ptr<Cell>(new Cell());
+                seen.emplace(node, shell);
+                std::vector<std::shared_ptr<Cell>> refs;
+                refs.reserve(node->references_.size());
+                for (const auto& ref : node->references_) {
+                    if (!ref) {
+                        throw std::invalid_argument("Cell tree contains a null reference");
+                    }
+                    refs.push_back(copy(ref.get()));
+                }
+                shell->data_ = node->data_;
+                shell->bitSize_ = node->bitSize_;
+                shell->references_ = std::move(refs);
+                shell->isSpecial_ = node->isSpecial_;
+                return shell;
+            };
+        return copy(cell);
+    }
+
+    Cell* Cell::releaseCopy(const std::shared_ptr<Cell>& cell) {
+        if (!cell) {
+            return nullptr;
+        }
+        return new Cell(cell->data_, cell->bitSize_, cell->references_, cell->isSpecial_);
+    }
     
     void Cell::checkCapacity(size_t bitCount) {
         if (bitSize_ + bitCount > MAX_BITS) {
@@ -167,6 +211,27 @@ namespace cton {
         }
         
         references_.push_back(cell);
+        return *this;
+    }
+
+    CellBuilder& CellBuilder::appendCell(const Cell& cell) {
+        const std::vector<uint8_t> data = cell.getData();
+        const size_t bitCount = cell.getBitSize();
+        size_t pos = 0;
+        while (pos < bitCount) {
+            size_t chunk = std::min(static_cast<size_t>(64), bitCount - pos);
+            uint64_t value = 0;
+            for (size_t i = 0; i < chunk; ++i) {
+                size_t bitPos = pos + i;
+                uint8_t bit = static_cast<uint8_t>((data[bitPos / 8] >> (7 - (bitPos % 8))) & 1);
+                value = (value << 1) | bit;
+            }
+            appendBits(buffer_, bitOffset_, chunk, value);
+            pos += chunk;
+        }
+        for (const auto& ref : cell.references()) {
+            storeRef(ref);
+        }
         return *this;
     }
     

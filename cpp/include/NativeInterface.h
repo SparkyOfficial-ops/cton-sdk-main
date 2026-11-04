@@ -10,6 +10,8 @@
 #include "Address.h"
 #include "Crypto.h"
 #include "Boc.h"
+#include "Hashmap.h"
+#include "Slice.h"
 
 // Export definitions for Windows DLL
 #ifdef _WIN32
@@ -101,7 +103,24 @@ extern "C" {
     CTON_SDK_CORE_API void* boc_get_root(void* boc);
     CTON_SDK_CORE_API void boc_set_root(void* boc, void* rootCell);
     
-    // Memory management functions
+    // Hashmap n X. Returns a new cell the caller destroys with cell_destroy.
+    // The cell is the dictionary root referenced by hme_root$1.
+    CTON_SDK_CORE_API void* hashmap_build(int keyBits, const uint64_t* keys, void** values, int count);
+
+    // Slice. The slice copies the cell, so the cell may be destroyed after slice_create.
+    CTON_SDK_CORE_API void* slice_create(void* cell);
+    CTON_SDK_CORE_API void slice_destroy(void* slice);
+    CTON_SDK_CORE_API bool slice_load_uint(void* slice, int bits, uint64_t* out);
+    CTON_SDK_CORE_API bool slice_load_int(void* slice, int bits, int64_t* out);
+    CTON_SDK_CORE_API int slice_load_coins(void* slice, uint8_t* buffer, int bufferSize);
+    CTON_SDK_CORE_API int slice_load_address(void* slice, int8_t* workchain, uint8_t* hash);
+    CTON_SDK_CORE_API void* slice_load_ref(void* slice);
+    CTON_SDK_CORE_API int slice_remaining_bits(void* slice);
+    CTON_SDK_CORE_API int slice_remaining_refs(void* slice);
+
+    // Every buffer this library returns from malloc is released with cton_free.
+    // Do not pass those pointers to the process C runtime from another module.
+    CTON_SDK_CORE_API void cton_free(void* ptr);
     CTON_SDK_CORE_API void free_string(char* str);
     CTON_SDK_CORE_API void free_string_array(char** strArray);
 }
