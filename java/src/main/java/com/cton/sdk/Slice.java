@@ -52,6 +52,21 @@ public final class Slice implements AutoCloseable {
         return out.getValue();
     }
 
+    public long loadUInt(int bits) {
+        return loadUint(bits);
+    }
+
+    public byte[] loadBytes(int length) {
+        if (length < 0) {
+            throw new IllegalArgumentException("length must be non-negative");
+        }
+        byte[] out = new byte[length];
+        for (int i = 0; i < length; i++) {
+            out[i] = (byte) loadUint(8);
+        }
+        return out;
+    }
+
     public long loadInt(int bits) {
         LongByReference out = new LongByReference();
         if (!CtonLibrary.INSTANCE.slice_load_int(nativeSlice, bits, out)) {

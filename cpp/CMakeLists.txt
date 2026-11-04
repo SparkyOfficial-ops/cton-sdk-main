@@ -18,6 +18,7 @@ file(GLOB_RECURSE HEADERS "include/*.h" "include/*.hpp")
 list(FILTER SOURCES EXCLUDE REGEX "/main\\.cpp$")
 list(FILTER SOURCES EXCLUDE REGEX "/test")
 list(FILTER SOURCES EXCLUDE REGEX "/demo\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "/compat_test\\.cpp$")
 
 # Create library
 add_library(cton-sdk-core SHARED ${SOURCES} ${HEADERS})

@@ -3,7 +3,10 @@
 
 package com.cton.sdk;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import com.sun.jna.Library;
 import com.sun.jna.Native;
@@ -173,10 +176,63 @@ public class Cell implements Closeable {
         return CtonLibrary.INSTANCE.cell_get_bit_size(nativeCell);
     }
     
+    public Slice toSlice() {
+        return new Slice(this);
+    }
+
     /**
-     * Отримати кількість референсів
-     * @return кількість референсів
+     * SHA-256 of the standard cell representation: d1, d2, data with the
+     * completion tag, then each reference's depth and hash.
      */
+    public byte[] representationHash() {
+        return reprHashAndDepth(this).hash;
+    }
+
+    private static final class HashDepth {
+        final byte[] hash;
+        final int depth;
+
+        HashDepth(byte[] hash, int depth) {
+            this.hash = hash;
+            this.depth = depth;
+        }
+    }
+
+    private static HashDepth reprHashAndDepth(Cell cell) {
+        int bitSize = cell.getBitSize();
+        byte[] data = cell.getData();
+        int refsCount = cell.getRefsCount();
+        int d1 = refsCount & 0x7F;
+        int d2 = (bitSize / 8) + ((bitSize + 7) / 8);
+        byte[] reprData = data.clone();
+        if (bitSize % 8 != 0 && reprData.length > 0) {
+            int last = reprData.length - 1;
+            int mask = 0x80 >> (bitSize % 8);
+            reprData[last] = (byte) (reprData[last] | mask);
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        out.write(d1);
+        out.write(d2);
+        out.write(reprData, 0, reprData.length);
+        int maxRefDepth = 0;
+        for (int i = 0; i < refsCount; i++) {
+            HashDepth child = reprHashAndDepth(cell.getRef(i));
+            out.write((child.depth >> 8) & 0xFF);
+            out.write(child.depth & 0xFF);
+            out.write(child.hash, 0, child.hash.length);
+            if (child.depth > maxRefDepth) {
+                maxRefDepth = child.depth;
+            }
+        }
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(out.toByteArray());
+            int depth = refsCount == 0 ? 0 : maxRefDepth + 1;
+            return new HashDepth(hash, depth);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 algorithm not available", e);
+        }
+    }
+
     public int getRefsCount() {
         if (closed) {
             throw new IllegalStateException("Cell has been closed");
