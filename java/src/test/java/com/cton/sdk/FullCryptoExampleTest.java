@@ -11,7 +11,6 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -95,7 +94,6 @@ public class FullCryptoExampleTest {
     
     @Test
     @DisplayName("Test ChaCha20 encryption simulation")
-    @Disabled("ChaCha20 implementation has known issues")
     public void testChaCha20() {
         // Тест 4: ChaCha20 шифрування (для безпеки гаманців)
         // Test 4: ChaCha20 encryption (for wallet security)

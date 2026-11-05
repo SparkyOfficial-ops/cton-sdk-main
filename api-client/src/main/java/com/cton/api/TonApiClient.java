@@ -16,6 +16,8 @@ import com.cton.api.dto.BlockHeader;
 import com.cton.api.dto.BlockTransactions;
 import com.cton.api.dto.SendBocResult;
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -205,20 +207,30 @@ public class TonApiClient {
      * @throws IOException якщо сталася помилка мережі
      */
     public JsonObject runGetMethod(String address, String method, JsonObject stack) throws IOException {
-        // формуємо URL запиту
-        // формируем URL запроса
-        // build request URL
+        return postRunGetMethod(address, method, tonStack(stack));
+    }
+
+    /**
+     * Стек TON Center — это JSON-массив. Пустой вызов seqno передаёт {@code []}.
+     */
+    public JsonObject runGetMethod(String address, String method, JsonArray stack) throws IOException {
+        return postRunGetMethod(address, method, stack == null ? new JsonArray() : stack);
+    }
+
+    private static JsonElement tonStack(JsonObject stack) {
+        if (stack == null || stack.size() == 0) {
+            return new JsonArray();
+        }
+        return stack;
+    }
+
+    private JsonObject postRunGetMethod(String address, String method, JsonElement stack) throws IOException {
         String url = baseUrl + "runGetMethod";
-        
-        // створюємо JSON тіло запиту
-        // создаем JSON тело запроса
-        // create JSON request body
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("address", address);
         requestBody.addProperty("method", method);
         requestBody.add("stack", stack);
-        
-        Request request = createRequest(url, "POST", 
+        Request request = createRequest(url, "POST",
             RequestBody.create(requestBody.toString(), MediaType.get("application/json")));
         return executeRequest(request);
     }
@@ -243,7 +255,7 @@ public class TonApiClient {
         JsonObject requestBody = new JsonObject();
         requestBody.addProperty("address", address);
         requestBody.addProperty("method", method);
-        requestBody.add("stack", stack);
+        requestBody.add("stack", tonStack(stack));
         
         Request request = createRequest(url, "POST", 
             RequestBody.create(requestBody.toString(), MediaType.get("application/json")));

@@ -11,11 +11,11 @@ import com.cton.sdk.Cell;
  * bodies. Nothing here is broadcast, and there is no invented opcode.
  */
 public class DeFiContracts extends Contract {
-
+    
     public DeFiContracts(Address address, TonApiClient apiClient) {
         super(address, apiClient);
     }
-
+    
     public Cell stonfiSwap(Address askWallet, BigInteger minAskAmount, Address recipient, Address referral) {
         return StonFi.swap(askWallet, minAskAmount, recipient, referral);
     }

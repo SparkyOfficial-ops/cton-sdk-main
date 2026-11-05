@@ -48,6 +48,11 @@ import com.google.gson.JsonObject;
  * - Работа с get-методами смарт-контрактов
  */
 public abstract class BaseWallet implements Wallet {
+    /** Pay transfer fees from the wallet balance, not from the message value. */
+    public static final int SEND_MODE_PAY_GAS_SEPARATELY = 1;
+    public static final int SEND_MODE_IGNORE_ERRORS = 2;
+    public static final int SEND_MODE_CARRY_ALL_REMAINING_BALANCE = 128;
+
     protected final Address address;
     protected final TonApiClient apiClient;
     
@@ -184,88 +189,12 @@ public abstract class BaseWallet implements Wallet {
     
     @Override
     public long getSeqno() throws IOException {
-        // Виконуємо get-метод seqno
-        // Выполняем get-метод seqno
-        // Execute seqno get-method
-        JsonObject stack = new JsonObject();
-        JsonObject result = runGetMethod("seqno", stack);
-        
-        // Перевіряємо чи є результат
-        // Проверяем, есть ли результат
-        // Check if there is a result
-        if (!result.has("result") || result.get("result").isJsonNull()) {
-            throw new IOException("Failed to get seqno");
-        }
-        
-        // Отримуємо стек результатів
-        // Получаем стек результатов
-        // Get result stack
-        JsonArray stackArray = result.getAsJsonArray("result");
-        if (stackArray.size() < 1) {
-            throw new IOException("Invalid seqno format");
-        }
-        
-        // Seqno - перший елемент стеку
-        // Seqno - first element of stack
-        // Seqno - первый элемент стека
-        JsonElement seqnoElement = stackArray.get(0);
-        if (!seqnoElement.isJsonArray()) {
-            throw new IOException("Invalid seqno data format");
-        }
-        
-        JsonArray seqnoArray = seqnoElement.getAsJsonArray();
-        if (seqnoArray.size() < 2) {
-            throw new IOException("Invalid seqno array format");
-        }
-        
-        // Другий елемент містить значення
-        // Second element contains the value
-        // Второй элемент содержит значение
-        String seqnoStr = seqnoArray.get(1).getAsString();
-        return Long.parseLong(seqnoStr);
+        return readStackInteger(runGetMethod("seqno", new JsonArray()));
     }
     
     @Override
     public int getVersion() throws IOException {
-        // Виконуємо get-метод get_version
-        // Выполняем get-метод get_version
-        // Execute get_version get-method
-        JsonObject stack = new JsonObject();
-        JsonObject result = runGetMethod("get_version", stack);
-        
-        // Перевіряємо чи є результат
-        // Проверяем, есть ли результат
-        // Check if there is a result
-        if (!result.has("result") || result.get("result").isJsonNull()) {
-            throw new IOException("Failed to get version");
-        }
-        
-        // Отримуємо стек результатів
-        // Получаем стек результатов
-        // Get result stack
-        JsonArray stackArray = result.getAsJsonArray("result");
-        if (stackArray.size() < 1) {
-            throw new IOException("Invalid version format");
-        }
-        
-        // Версія - перший елемент стеку
-        // Version - first element of stack
-        // Версия - первый элемент стека
-        JsonElement versionElement = stackArray.get(0);
-        if (!versionElement.isJsonArray()) {
-            throw new IOException("Invalid version data format");
-        }
-        
-        JsonArray versionArray = versionElement.getAsJsonArray();
-        if (versionArray.size() < 2) {
-            throw new IOException("Invalid version array format");
-        }
-        
-        // Другий елемент містить значення
-        // Second element contains the value
-        // Второй элемент содержит значение
-        String versionStr = versionArray.get(1).getAsString();
-        return Integer.parseInt(versionStr);
+        return (int) readStackInteger(runGetMethod("get_version", new JsonArray()));
     }
     
     /**
@@ -277,6 +206,37 @@ public abstract class BaseWallet implements Wallet {
      */
     protected JsonObject runGetMethod(String method, JsonObject stack) throws IOException {
         return apiClient.runGetMethod(address.toRaw(), method, stack);
+    }
+
+    protected JsonObject runGetMethod(String method, JsonArray stack) throws IOException {
+        return apiClient.runGetMethod(address.toRaw(), method, stack);
+    }
+
+    private static long readStackInteger(JsonObject response) throws IOException {
+        if (response == null || !response.has("ok") || response.get("ok").isJsonNull()
+                || !response.get("ok").getAsBoolean() || !response.has("result") || response.get("result").isJsonNull()) {
+            throw new IOException("get method failed: " + response);
+        }
+        JsonElement resultElement = response.get("result");
+        JsonArray stack;
+        if (resultElement.isJsonObject()) {
+            JsonObject result = resultElement.getAsJsonObject();
+            if (result.has("exit_code") && result.get("exit_code").getAsInt() != 0) {
+                throw new IOException("get method exit_code " + result.get("exit_code") + ": " + response);
+            }
+            if (!result.has("stack") || !result.get("stack").isJsonArray()) {
+                throw new IOException("get method returned no stack: " + response);
+            }
+            stack = result.getAsJsonArray("stack");
+        } else if (resultElement.isJsonArray()) {
+            stack = resultElement.getAsJsonArray();
+        } else {
+            throw new IOException("get method returned no stack: " + response);
+        }
+        if (stack.size() < 1 || !stack.get(0).isJsonArray() || stack.get(0).getAsJsonArray().size() < 2) {
+            throw new IOException("get method stack is empty: " + response);
+        }
+        return Long.decode(stack.get(0).getAsJsonArray().get(1).getAsString());
     }
     
     /**
@@ -313,6 +273,96 @@ public abstract class BaseWallet implements Wallet {
         
         // 7. Надсилаємо через API
         sendTransaction(externalMessage);
+    }
+
+    /**
+     * Несколько внутренних сообщений одним внешним сообщением кошелька.
+     * V4 добавляет opcode 0. Возвращает base64 BoC отправленного сообщения.
+     */
+    public String sendTransfers(List<OutgoingTransfer> transfers, Crypto.PrivateKey privateKey, Long validUntil)
+            throws IOException {
+        if (transfers == null || transfers.isEmpty() || transfers.size() > 4) {
+            throw new IOException("A wallet message contains from 1 to 4 transfers");
+        }
+        long seqno = getSeqno();
+        int subwalletId = getSubwalletId();
+        long until = validUntil != null ? validUntil : Instant.now().getEpochSecond() + 60;
+        boolean walletV4 = getVersion() == 4;
+        List<Cell> messages = new ArrayList<>();
+        for (OutgoingTransfer transfer : transfers) {
+            messages.add(internalMessage(transfer));
+        }
+        Cell signingBody = signingBody(subwalletId, until, seqno, messages, transfers, walletV4);
+        byte[] signature = Crypto.sign(privateKey, cellRepresentationHash(signingBody));
+        Cell externalBody = signedBody(signature, subwalletId, until, seqno, messages, transfers, walletV4);
+        Cell externalMessage = createExternalInMessage(externalBody);
+        sendTransaction(externalMessage);
+        try (Boc boc = new Boc(externalMessage)) {
+            return Base64.getEncoder().encodeToString(boc.serialize(true, true));
+        }
+    }
+
+    private Cell internalMessage(OutgoingTransfer transfer) {
+        CellBuilder msg = new CellBuilder();
+        msg.storeUInt(1, 0);
+        msg.storeUInt(1, 1);
+        msg.storeUInt(1, transfer.bounce ? 1 : 0);
+        msg.storeUInt(1, 0);
+        msg.storeAddress(this.address);
+        msg.storeAddress(transfer.destination);
+        msg.storeCoins(transfer.amount);
+        msg.storeUInt(1, 0);
+        msg.storeCoins(BigInteger.ZERO);
+        msg.storeCoins(BigInteger.ZERO);
+        msg.storeUInt(64, 0);
+        msg.storeUInt(32, Instant.now().getEpochSecond());
+        if (transfer.stateInit == null) {
+            msg.storeUInt(1, 0);
+        } else {
+            msg.storeUInt(1, 1);
+            msg.storeUInt(1, 1);
+            msg.storeRef(transfer.stateInit);
+        }
+        if (transfer.body == null) {
+            msg.storeUInt(1, 0);
+        } else {
+            msg.storeUInt(1, 1);
+            msg.storeRef(transfer.body);
+        }
+        return msg.build();
+    }
+
+    private Cell signingBody(int subwalletId, long validUntil, long seqno, List<Cell> messages,
+                             List<OutgoingTransfer> transfers, boolean walletV4) {
+        CellBuilder builder = new CellBuilder();
+        builder.storeUInt(32, subwalletId & 0xFFFFFFFFL);
+        builder.storeUInt(32, validUntil);
+        builder.storeUInt(32, seqno);
+        if (walletV4) {
+            builder.storeUInt(8, 0);
+        }
+        for (int i = 0; i < messages.size(); i++) {
+            builder.storeUInt(8, transfers.get(i).sendMode);
+            builder.storeRef(messages.get(i));
+        }
+        return builder.build();
+    }
+
+    private Cell signedBody(byte[] signature, int subwalletId, long validUntil, long seqno, List<Cell> messages,
+                            List<OutgoingTransfer> transfers, boolean walletV4) {
+        CellBuilder builder = new CellBuilder();
+        builder.storeBytes(signature);
+        builder.storeUInt(32, subwalletId & 0xFFFFFFFFL);
+        builder.storeUInt(32, validUntil);
+        builder.storeUInt(32, seqno);
+        if (walletV4) {
+            builder.storeUInt(8, 0);
+        }
+        for (int i = 0; i < messages.size(); i++) {
+            builder.storeUInt(8, transfers.get(i).sendMode);
+            builder.storeRef(messages.get(i));
+        }
+        return builder.build();
     }
     
     /**

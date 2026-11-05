@@ -215,14 +215,24 @@ public class Cell implements Closeable {
         out.write(d2);
         out.write(reprData, 0, reprData.length);
         int maxRefDepth = 0;
+        int[] depths = new int[refsCount];
+        byte[][] hashes = new byte[refsCount][];
         for (int i = 0; i < refsCount; i++) {
             HashDepth child = reprHashAndDepth(cell.getRef(i));
-            out.write((child.depth >> 8) & 0xFF);
-            out.write(child.depth & 0xFF);
-            out.write(child.hash, 0, child.hash.length);
+            depths[i] = child.depth;
+            hashes[i] = child.hash;
             if (child.depth > maxRefDepth) {
                 maxRefDepth = child.depth;
             }
+        }
+        // Depths of every reference come first, then their hashes.
+        // A cell with one reference looks the same either way; two or more do not.
+        for (int depth : depths) {
+            out.write((depth >> 8) & 0xFF);
+            out.write(depth & 0xFF);
+        }
+        for (byte[] hash : hashes) {
+            out.write(hash, 0, hash.length);
         }
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest(out.toByteArray());

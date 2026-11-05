@@ -376,9 +376,13 @@ namespace cton {
         if (!ctx) {
             throw std::runtime_error("Failed to create EVP cipher context");
         }
+
+        // OpenSSL wants 16 bytes: 32-bit little-endian block counter, then the 12-byte nonce.
+        unsigned char iv[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+        std::memcpy(iv + 4, nonce.data(), 12);
         
         // Initialize encryption
-        if (EVP_EncryptInit_ex(ctx, EVP_chacha20(), nullptr, key.data(), nonce.data()) != 1) {
+        if (EVP_EncryptInit_ex(ctx, EVP_chacha20(), nullptr, key.data(), iv) != 1) {
             EVP_CIPHER_CTX_free(ctx);
             throw std::runtime_error("Failed to initialize ChaCha20 encryption");
         }

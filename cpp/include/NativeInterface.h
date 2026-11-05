@@ -89,6 +89,9 @@ extern "C" {
     CTON_SDK_CORE_API bool crypto_verify_secp256k1(void* publicKey, const uint8_t* message, int messageLen, 
                          const uint8_t* signature, int signatureLen);
     CTON_SDK_CORE_API char** crypto_generate_mnemonic();
+    CTON_SDK_CORE_API char** crypto_generate_ton_mnemonic(int wordCount);
+    CTON_SDK_CORE_API bool crypto_is_ton_mnemonic(char** mnemonic);
+    CTON_SDK_CORE_API void* crypto_mnemonic_to_ton_seed(char** mnemonic);
     CTON_SDK_CORE_API void* crypto_mnemonic_to_private_key(char** mnemonic);
     CTON_SDK_CORE_API void* crypto_mnemonic_to_private_key_ton(char** mnemonic, bool fast);
     CTON_SDK_CORE_API void* crypto_chacha20_encrypt(const uint8_t* data, int dataLen, const uint8_t* key, const uint8_t* nonce);

@@ -7,6 +7,7 @@
 #include "../include/Cell.h"
 #include "../include/Address.h"
 #include "../include/Crypto.h"
+#include "../include/Mnemonic.h"
 #include "../include/Boc.h"
 #include "../include/Hashmap.h"
 #include "../include/Slice.h"
@@ -826,6 +827,75 @@ void* crypto_mnemonic_to_private_key(char** mnemonic) {
         return nullptr;
     } catch (...) {
         // Handle any other unexpected exceptions
+        return nullptr;
+    }
+}
+
+static char** words_to_cstr_array(const std::vector<std::string>& words) {
+    char** result = static_cast<char**>(std::malloc((words.size() + 1) * sizeof(char*)));
+    if (!result) {
+        return nullptr;
+    }
+    for (size_t i = 0; i < words.size(); ++i) {
+        result[i] = string_to_cstr(words[i]);
+        if (!result[i]) {
+            for (size_t j = 0; j < i; ++j) {
+                free_string(result[j]);
+            }
+            std::free(result);
+            return nullptr;
+        }
+    }
+    result[words.size()] = nullptr;
+    return result;
+}
+
+static std::vector<std::string> cstr_array_to_words(char** mnemonic) {
+    std::vector<std::string> words;
+    if (!mnemonic) {
+        return words;
+    }
+    for (int i = 0; mnemonic[i] != nullptr; ++i) {
+        words.emplace_back(mnemonic[i]);
+    }
+    return words;
+}
+
+char** crypto_generate_ton_mnemonic(int wordCount) {
+    try {
+        return words_to_cstr_array(Mnemonic::generateTon(wordCount));
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+bool crypto_is_ton_mnemonic(char** mnemonic) {
+    if (!mnemonic) {
+        return false;
+    }
+    try {
+        return Mnemonic::isTonMnemonic(cstr_array_to_words(mnemonic));
+    } catch (...) {
+        return false;
+    }
+}
+
+void* crypto_mnemonic_to_ton_seed(char** mnemonic) {
+    if (!mnemonic) {
+        return nullptr;
+    }
+    try {
+        auto seed = Mnemonic::toTonSeed(cstr_array_to_words(mnemonic), false);
+        if (seed.size() < 64) {
+            return nullptr;
+        }
+        void* out = std::malloc(64);
+        if (!out) {
+            return nullptr;
+        }
+        std::memcpy(out, seed.data(), 64);
+        return out;
+    } catch (...) {
         return nullptr;
     }
 }

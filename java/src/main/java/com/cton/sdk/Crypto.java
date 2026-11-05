@@ -85,6 +85,9 @@ public class Crypto {
         
         // Генерація мнемонічної фрази
         Pointer crypto_generate_mnemonic();
+        Pointer crypto_generate_ton_mnemonic(int wordCount);
+        boolean crypto_is_ton_mnemonic(Pointer mnemonic);
+        Pointer crypto_mnemonic_to_ton_seed(Pointer mnemonic);
         
         // Створення приватного ключа з мнемоніки
         Pointer crypto_mnemonic_to_private_key(Pointer mnemonic);
@@ -678,5 +681,91 @@ public class Crypto {
      */
     public static PrivateKey mnemonicToPrivateKeyFromTon(List<String> mnemonic) {
         return mnemonicToPrivateKeyFromTon(mnemonic, false);
+    }
+
+    /**
+     * BIP-39 фраза из {@code wordCount} слов, которая проходит проверку TON.
+     */
+    public static List<String> generateTonMnemonic(int wordCount) {
+        if (wordCount != 12 && wordCount != 18 && wordCount != 24) {
+            throw new IllegalArgumentException("Word count must be 12, 18, or 24");
+        }
+        Pointer mnemonicPtr = CtonLibrary.INSTANCE.crypto_generate_ton_mnemonic(wordCount);
+        if (mnemonicPtr == null) {
+            throw new RuntimeException("Failed to generate a TON mnemonic");
+        }
+        try {
+            return readMnemonic(mnemonicPtr);
+        } finally {
+            CtonLibrary.INSTANCE.free_string_array(mnemonicPtr);
+        }
+    }
+
+    /**
+     * Первый байт PBKDF2-сида со солью "TON seed version" равен 1.
+     */
+    public static boolean isValidTonMnemonic(List<String> mnemonic) {
+        if (mnemonic == null || mnemonic.isEmpty()) {
+            return false;
+        }
+        MnemonicArgs args = mnemonicPointers(mnemonic);
+        return CtonLibrary.INSTANCE.crypto_is_ton_mnemonic(args.array);
+    }
+
+    /**
+     * 64 байта PBKDF2-HMAC-SHA512 со солью "TON default seed" и 100000 итерациями.
+     * Первые 32 байта — seed Ed25519.
+     */
+    public static byte[] mnemonicToTonSeed(List<String> mnemonic) {
+        if (mnemonic == null || mnemonic.isEmpty()) {
+            throw new IllegalArgumentException("Mnemonic cannot be null or empty");
+        }
+        MnemonicArgs args = mnemonicPointers(mnemonic);
+        Pointer seedPtr = CtonLibrary.INSTANCE.crypto_mnemonic_to_ton_seed(args.array);
+        if (seedPtr == null) {
+            throw new RuntimeException("Failed to derive a TON seed");
+        }
+        try {
+            return seedPtr.getByteArray(0, 64);
+        } finally {
+            CtonLibrary.INSTANCE.cton_free(seedPtr);
+        }
+    }
+
+    private static List<String> readMnemonic(Pointer mnemonicPtr) {
+        List<String> result = new ArrayList<>();
+        int index = 0;
+        Pointer stringPtr;
+        while ((stringPtr = mnemonicPtr.getPointer(index * Native.POINTER_SIZE)) != null) {
+            result.add(stringPtr.getString(0));
+            index++;
+        }
+        return result;
+    }
+
+    private static final class MnemonicArgs {
+        final Pointer array;
+        @SuppressWarnings("unused")
+        private final Pointer[] words;
+
+        private MnemonicArgs(Pointer array, Pointer[] words) {
+            this.array = array;
+            this.words = words;
+        }
+    }
+
+    private static MnemonicArgs mnemonicPointers(List<String> mnemonic) {
+        String[] mnemonicArray = mnemonic.toArray(new String[0]);
+        Pointer[] pointers = new Pointer[mnemonicArray.length + 1];
+        for (int i = 0; i < mnemonicArray.length; i++) {
+            pointers[i] = new Memory(mnemonicArray[i].length() + 1);
+            pointers[i].setString(0, mnemonicArray[i]);
+        }
+        pointers[mnemonicArray.length] = null;
+        Memory pointerArray = new Memory(pointers.length * Native.POINTER_SIZE);
+        for (int i = 0; i < pointers.length; i++) {
+            pointerArray.setPointer(i * Native.POINTER_SIZE, pointers[i]);
+        }
+        return new MnemonicArgs(pointerArray, pointers);
     }
 }

@@ -31,6 +31,11 @@ namespace cton {
          * @return вектор слів мнемонічної фрази
          */
         static std::vector<std::string> generate(int wordCount = 24);
+
+        /**
+         * BIP-39 фраза, которая проходит проверку TON (первый байт PBKDF2-сида равен 1).
+         */
+        static std::vector<std::string> generateTon(int wordCount = 24);
         
         /**
          * Перетворення мнемоніки в seed

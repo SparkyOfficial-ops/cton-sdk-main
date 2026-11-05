@@ -346,6 +346,16 @@ namespace cton {
         
         return mnemonic;
     }
+
+    std::vector<std::string> Mnemonic::generateTon(int wordCount) {
+        for (int attempt = 0; attempt < 20000; ++attempt) {
+            std::vector<std::string> phrase = generate(wordCount);
+            if (isTonMnemonic(phrase)) {
+                return phrase;
+            }
+        }
+        throw std::runtime_error("Failed to generate a TON mnemonic");
+    }
     
     std::vector<uint8_t> Mnemonic::toSeed(const std::vector<std::string>& mnemonic, 
                                         const std::string& passphrase) {
@@ -539,8 +549,22 @@ namespace cton {
                 }
             }
             
-            // Compare checksums
-            return calculatedChecksum == extractedChecksum;
+            // Only the leading checksum bits are part of the phrase.
+            // A 24-word phrase has 8 of them, a 12-word phrase has 4.
+            int checksumBitCount = entropyBits / 32;
+            for (int bit = 0; bit < checksumBitCount; ++bit) {
+                size_t byteIndex = static_cast<size_t>(bit / 8);
+                int shift = 7 - (bit % 8);
+                if (byteIndex >= calculatedChecksum.size() || byteIndex >= extractedChecksum.size()) {
+                    return false;
+                }
+                int calculatedBit = (calculatedChecksum[byteIndex] >> shift) & 1;
+                int extractedBit = (extractedChecksum[byteIndex] >> shift) & 1;
+                if (calculatedBit != extractedBit) {
+                    return false;
+                }
+            }
+            return true;
         } catch (...) {
             return false;
         }
