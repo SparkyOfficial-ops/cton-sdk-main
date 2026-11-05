@@ -8,7 +8,7 @@ package com.cton.api;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.io.IOException;
@@ -25,10 +25,12 @@ public class TonApiClientComprehensiveTest {
     
     @BeforeEach
     public void setUp() {
-        // Використовуємо тестову адресу TON Center API
-        // Используем тестовый адрес TON Center API
-        // Use test TON Center API address
-        client = new TonApiClient("https://toncenter.com/api/v2/");
+        String apiKey = System.getenv("CTON_TESTNET_API_KEY");
+        if (apiKey != null && !apiKey.isBlank()) {
+            client = new TonApiClient("https://testnet.toncenter.com/api/v2/", apiKey);
+        } else {
+            client = new TonApiClient("https://toncenter.com/api/v2/");
+        }
     }
     
     // Тести для синхронних методів
@@ -36,7 +38,7 @@ public class TonApiClientComprehensiveTest {
     // Тесты для синхронных методов
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testGetAddressInformation() throws IOException {
         // Тест отримання інформації про адресу
         // Тест получения информации об адресе
@@ -49,7 +51,7 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testRunGetMethod() throws IOException {
         // Тест виконання get-методу
         // Тест выполнения get-метода
@@ -68,16 +70,12 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testGetBlockHeader() throws IOException {
         // Тест отримання інформації про блок
         // Тест получения информации о блоке
         // Test getting block information
-        int workchain = -1; // masterchain
-        long shard = -9223372036854775808L; // основний шард / основной шард / main shard
-        long seqno = 1234567; // приклад номера / пример номера / example number
-        
-        JsonObject result = client.getBlockHeader(workchain, shard, seqno);
+        JsonObject result = client.getBlockHeader(workchain(), shard(), seqno());
         assertNotNull(result);
         // Результат може бути різним залежно від доступності блоку
         // Результат может быть разным в зависимости от доступности блока
@@ -85,16 +83,12 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testGetBlockTransactions() throws IOException {
         // Тест отримання транзакцій з блоку
         // Тест получения транзакций из блока
         // Test getting transactions from block
-        int workchain = -1; // masterchain
-        long shard = -9223372036854775808L; // основний шард / основной шард / main shard
-        long seqno = 1234567; // приклад номера / пример номера / example number
-        
-        JsonObject result = client.getBlockTransactions(workchain, shard, seqno);
+        JsonObject result = client.getBlockTransactions(workchain(), shard(), seqno());
         assertNotNull(result);
         // Результат може бути різним залежно від доступності блоку
         // Результат может быть разным в зависимости от доступности блока
@@ -128,7 +122,7 @@ public class TonApiClientComprehensiveTest {
     // Тесты для асинхронных методов
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testGetAddressInformationAsync() {
         // Тест асинхронного отримання інформації про адресу
         // Тест асинхронного получения информации об адресе
@@ -145,7 +139,7 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
     public void testRunGetMethodAsync() {
         // Тест асинхронного виконання get-методу
         // Тест асинхронного выполнения get-метода
@@ -165,16 +159,12 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
-    public void testGetBlockHeaderAsync() {
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
+    public void testGetBlockHeaderAsync() throws IOException {
         // Тест асинхронного отримання інформації про блок
         // Тест асинхронного получения информации о блоке
         // Test asynchronous getting block information
-        int workchain = -1; // masterchain
-        long shard = -9223372036854775808L; // основний шард / основной шард / main shard
-        long seqno = 1234567; // приклад номера / пример номера / example number
-        
-        CompletableFuture<JsonObject> future = client.getBlockHeaderAsync(workchain, shard, seqno);
+        CompletableFuture<JsonObject> future = client.getBlockHeaderAsync(workchain(), shard(), seqno());
         
         assertDoesNotThrow(() -> {
             JsonObject result = future.join();
@@ -183,16 +173,12 @@ public class TonApiClientComprehensiveTest {
     }
     
     @Test
-    @Disabled("Requires network connection and valid API key")
-    public void testGetBlockTransactionsAsync() {
+    @EnabledIfEnvironmentVariable(named = "CTON_TESTNET_API_KEY", matches = ".+")
+    public void testGetBlockTransactionsAsync() throws IOException {
         // Тест асинхронного отримання транзакцій з блоку
         // Тест асинхронного получения транзакций из блока
         // Test asynchronous getting transactions from block
-        int workchain = -1; // masterchain
-        long shard = -9223372036854775808L; // основний шард / основной шард / main shard
-        long seqno = 1234567; // приклад номера / пример номера / example number
-        
-        CompletableFuture<JsonObject> future = client.getBlockTransactionsAsync(workchain, shard, seqno);
+        CompletableFuture<JsonObject> future = client.getBlockTransactionsAsync(workchain(), shard(), seqno());
         
         assertDoesNotThrow(() -> {
             JsonObject result = future.join();
@@ -226,5 +212,32 @@ public class TonApiClientComprehensiveTest {
         assertThrows(RuntimeException.class, () -> {
             future.join();
         });
+    }
+
+    private static long[] cachedMasterchain;
+
+    private int workchain() throws IOException {
+        return (int) masterchain()[0];
+    }
+
+    private long shard() throws IOException {
+        return masterchain()[1];
+    }
+
+    private long seqno() throws IOException {
+        return masterchain()[2];
+    }
+
+    private long[] masterchain() throws IOException {
+        if (cachedMasterchain != null) {
+            return cachedMasterchain;
+        }
+        JsonObject last = client.getMasterchainInfo().getAsJsonObject("result").getAsJsonObject("last");
+        com.google.gson.JsonElement shard = last.get("shard");
+        long shardValue = shard.getAsJsonPrimitive().isString()
+            ? Long.parseLong(shard.getAsString())
+            : shard.getAsLong();
+        cachedMasterchain = new long[] { last.get("workchain").getAsLong(), shardValue, last.get("seqno").getAsLong() };
+        return cachedMasterchain;
     }
 }

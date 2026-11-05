@@ -151,16 +151,10 @@ public abstract class BaseWallet implements Wallet {
         // Serialize transaction to BOC
         Boc boc = new Boc(transaction);
         byte[] bocBytes = boc.serialize(true, true);
-        
-        // Конвертуємо в Base64
-        // Конвертируем в Base64
-        // Convert to Base64
-        String bocBase64 = Base64.getEncoder().encodeToString(bocBytes);
-        
-        // Надсилаємо через API
-        // Отправляем через API
-        // Send through API
-        apiClient.sendBoc(bocBytes);
+        JsonObject response = apiClient.sendBoc(bocBytes);
+        if (response.has("ok") && !response.get("ok").isJsonNull() && !response.get("ok").getAsBoolean()) {
+            throw new IOException("sendBoc rejected the message: " + response);
+        }
     }
 
     /**
@@ -248,31 +242,36 @@ public abstract class BaseWallet implements Wallet {
      * @throws IOException якщо сталася помилка мережі
      */
     public void transfer(Address destination, BigInteger amount, String comment, Crypto.PrivateKey privateKey) throws IOException {
-        // 1. Отримуємо seqno та параметри підкошелька
-        long seqno = getSeqno();
+        int version = getVersion();
         int subwalletId = getSubwalletId();
-        long validUntil = Instant.now().getEpochSecond() + 60; // валідність 1 хвилина
-        int sendMode = 3; // PAYABLE_FWD_FEE | DESTROY_ON_ZERO_BALANCE (стандартний простий переказ)
-        
-        // 2. Внутрішнє повідомлення-платеж (int_msg_info)
+        boolean deploy = "uninitialized".equals(accountState());
+        long seqno = deploy ? 0L : getSeqno();
+        long validUntil = Instant.now().getEpochSecond() + 60;
+        int sendMode = SEND_MODE_PAY_GAS_SEPARATELY | SEND_MODE_IGNORE_ERRORS;
+        boolean walletV4 = version == 4;
         Cell internalMessage = createInternalMessage(destination, amount, comment, destination.isBounceable());
-        
-        // 3. Тіло для підпису:
-        //    signing_body = subwallet_id(32) + valid_until(32) + seqno(32) + send_mode(8) + [Order Message]
-        Cell signingBody = buildSigningBody(subwalletId, validUntil, seqno, sendMode, internalMessage);
-        
-        // 4. signature = Ed25519( representation_hash(signing_body) )
-        byte[] signingHash = cellRepresentationHash(signingBody);
-        byte[] signature = Crypto.sign(privateKey, signingHash);
-        
-        // 5. Тіло зовнішнього повідомлення: signature(512 bits) + signing_body
-        Cell externalBody = buildSignedExternalBody(signature, subwalletId, validUntil, seqno, sendMode, internalMessage);
-        
-        // 6. Гортаємо в ext_in_msg_info$10 (зовнішнє in-повідомлення до контракту кошелька)
-        Cell externalMessage = createExternalInMessage(externalBody);
-        
-        // 7. Надсилаємо через API
-        sendTransaction(externalMessage);
+        OutgoingTransfer outgoing = new OutgoingTransfer(
+            destination, amount, null, null, sendMode, destination.isBounceable());
+        Cell signingBody = signingBody(subwalletId, validUntil, seqno,
+            java.util.Collections.singletonList(internalMessage),
+            java.util.Collections.singletonList(outgoing), walletV4);
+        byte[] signature = Crypto.sign(privateKey, cellRepresentationHash(signingBody));
+        if (signature.length != 64) {
+            throw new IOException("Ed25519 signature was not created");
+        }
+        Cell externalBody = signedBody(signature, subwalletId, validUntil, seqno,
+            java.util.Collections.singletonList(internalMessage),
+            java.util.Collections.singletonList(outgoing), walletV4);
+        Cell stateInit = null;
+        if (deploy) {
+            if (version != 3 && version != 4) {
+                throw new IOException("StateInit deploy is defined for wallet V3R2 and V4R2");
+            }
+            try (Crypto.PublicKey publicKey = privateKey.getPublicKey()) {
+                stateInit = StateInit.forWallet(version, subwalletId, publicKey.getData()).toCell();
+            }
+        }
+        sendTransaction(createExternalInMessage(externalBody, stateInit));
     }
 
     /**
@@ -397,15 +396,37 @@ public abstract class BaseWallet implements Wallet {
      * Зовнішнє in-повідомлення (ext_in_msg_info$10) до адреси самого кошелька.
      */
     protected Cell createExternalInMessage(Cell body) {
+        return createExternalInMessage(body, null);
+    }
+
+    protected Cell createExternalInMessage(Cell body, Cell stateInit) {
         CellBuilder msg = new CellBuilder();
         msg.storeUInt(2, 2);              // ext_in_msg_info$10
         msg.storeUInt(2, 0);             // src = addr_none$00
         msg.storeAddress(this.address);  // dst = адреса кошелька
         msg.storeCoins(BigInteger.ZERO); // import_fee = 0
-        msg.storeUInt(1, 0);             // init: відсутній StateInit
+        if (stateInit == null) {
+            msg.storeUInt(1, 0);
+        } else {
+            msg.storeUInt(1, 1);         // Maybe StateInit
+            msg.storeUInt(1, 1);         // Either ^StateInit
+            msg.storeRef(stateInit);
+        }
         msg.storeUInt(1, 1);             // body: у референсі
         msg.storeRef(body);
         return msg.build();
+    }
+
+    private String accountState() throws IOException {
+        JsonObject info = apiClient.getAddressInformation(address.toRaw());
+        if (info == null || !info.has("result") || !info.get("result").isJsonObject()) {
+            throw new IOException("getAddressInformation: " + info);
+        }
+        JsonObject result = info.getAsJsonObject("result");
+        if (!result.has("state") || result.get("state").isJsonNull()) {
+            throw new IOException("getAddressInformation has no state: " + info);
+        }
+        return result.get("state").getAsString();
     }
     
     /**

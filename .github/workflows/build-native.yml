@@ -57,8 +57,23 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          vcpkg install openssl:x64-windows
-          echo "OPENSSL_ROOT_DIR=$env:VCPKG_ROOT/installed/x64-windows" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # windows-latest sets VCPKG_INSTALLATION_ROOT (C:\vcpkg), not VCPKG_ROOT.
+          # An empty VCPKG_ROOT made OPENSSL_ROOT_DIR=/installed/x64-windows, and
+          # FindOpenSSL then searches only that missing folder.
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = $env:VCPKG_ROOT }
+          if (-not $vcpkgRoot) { $vcpkgRoot = "C:\vcpkg" }
+          Write-Host "vcpkg root: $vcpkgRoot"
+          & vcpkg install openssl:x64-windows
+          $openssl = Join-Path $vcpkgRoot "installed\x64-windows"
+          $header = Join-Path $openssl "include\openssl\ssl.h"
+          if (-not (Test-Path $header)) {
+            Write-Error "OpenSSL headers were not installed at $header"
+            exit 1
+          }
+          $opensslCmake = ($openssl -replace '\\', '/')
+          "OPENSSL_ROOT_DIR=$opensslCmake" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OPENSSL_ROOT_DIR=$opensslCmake"
 
       - name: Setup MSVC
         if: runner.os == 'Windows'
@@ -70,9 +85,14 @@ jobs:
         run: |
           $extra = @()
           if ("${{ runner.os }}" -eq "Windows") {
+            if (-not $env:OPENSSL_ROOT_DIR) {
+              Write-Error "OPENSSL_ROOT_DIR is not set"
+              exit 1
+            }
             $extra += "-G"
             $extra += "Ninja"
             $extra += "-DOPENSSL_USE_STATIC_LIBS=OFF"
+            $extra += "-DOPENSSL_ROOT_DIR=$($env:OPENSSL_ROOT_DIR)"
           }
           if ("${{ runner.os }}" -eq "macOS") {
             $prefix = (brew --prefix openssl@3).Trim()

@@ -167,7 +167,10 @@ namespace cton {
         // crc32c (CRC32-C Castagnoli) по всій попередній послідовності
         if (hashCRC) {
             uint32_t crc = calculateCRC32(result);
-            appendUintBE(result, crc, 4);
+            result.push_back(static_cast<uint8_t>(crc & 0xFF));
+            result.push_back(static_cast<uint8_t>((crc >> 8) & 0xFF));
+            result.push_back(static_cast<uint8_t>((crc >> 16) & 0xFF));
+            result.push_back(static_cast<uint8_t>((crc >> 24) & 0xFF));
         }
 
         return result;

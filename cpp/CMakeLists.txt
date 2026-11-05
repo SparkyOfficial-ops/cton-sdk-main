@@ -71,6 +71,36 @@ if(NOT OpenSSL_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/../vcpkg/installed/x64-wind
     find_package(OpenSSL QUIET)
 endif()
 
+# A wrong OPENSSL_ROOT_DIR makes FindOpenSSL search only that folder
+# (NO_DEFAULT_PATH) and report both the headers and the libraries missing.
+if(DEFINED ENV{OPENSSL_ROOT_DIR} AND NOT EXISTS "$ENV{OPENSSL_ROOT_DIR}/include/openssl/ssl.h")
+    message(STATUS "Ignoring OPENSSL_ROOT_DIR that has no OpenSSL headers: $ENV{OPENSSL_ROOT_DIR}")
+    unset(ENV{OPENSSL_ROOT_DIR})
+endif()
+if(DEFINED OPENSSL_ROOT_DIR AND NOT EXISTS "${OPENSSL_ROOT_DIR}/include/openssl/ssl.h")
+    unset(OPENSSL_ROOT_DIR)
+endif()
+
+# GitHub windows-latest exposes VCPKG_INSTALLATION_ROOT, not VCPKG_ROOT.
+if(NOT OpenSSL_FOUND AND WIN32)
+    set(_vcpkg_roots "")
+    if(DEFINED ENV{VCPKG_INSTALLATION_ROOT})
+        list(APPEND _vcpkg_roots "$ENV{VCPKG_INSTALLATION_ROOT}")
+    endif()
+    if(DEFINED ENV{VCPKG_ROOT})
+        list(APPEND _vcpkg_roots "$ENV{VCPKG_ROOT}")
+    endif()
+    list(APPEND _vcpkg_roots "C:/vcpkg")
+    foreach(_root IN LISTS _vcpkg_roots)
+        if(EXISTS "${_root}/installed/x64-windows/include/openssl/ssl.h")
+            set(OPENSSL_ROOT_DIR "${_root}/installed/x64-windows")
+            message(STATUS "Looking for OpenSSL in vcpkg: ${OPENSSL_ROOT_DIR}")
+            find_package(OpenSSL 3 QUIET)
+            break()
+        endif()
+    endforeach()
+endif()
+
 # If still not found, use OpenSSL 3 from the system or OPENSSL_ROOT_DIR.
 if(NOT OpenSSL_FOUND)
     message(STATUS "Looking for OpenSSL 3 in system locations")

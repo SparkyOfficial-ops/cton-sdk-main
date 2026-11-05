@@ -66,48 +66,54 @@ public class TonApiClient {
      * @throws IOException if network error occurred
      */
     private JsonObject executeRequest(Request request) throws IOException {
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                throw new IOException("Unexpected response code: " + response);
-            }
-            
+        try (Response response = call(request)) {
             ResponseBody body = response.body();
             if (body == null) {
                 throw new IOException("Empty response body");
             }
-            
-            // парсимо JSON відповідь
-            // парсим JSON ответ
-            // parse JSON response
             String responseBody = body.string();
             return JsonParser.parseString(responseBody).getAsJsonObject();
         }
     }
-    
-    /**
-     * Execute HTTP request and deserialize to specified type
-     * @param request HTTP request
-     * @param clazz class for deserialization
-     * @return object of specified type
-     * @throws IOException if network error occurred
-     */
+
     private <T> T executeRequest(Request request, Class<T> clazz) throws IOException {
-        try (Response response = httpClient.newCall(request).execute()) {
-            if (!response.isSuccessful()) {
-                throw new IOException("Unexpected response code: " + response);
-            }
-            
+        try (Response response = call(request)) {
             ResponseBody body = response.body();
             if (body == null) {
                 throw new IOException("Empty response body");
             }
-            
-            // парсимо JSON відповідь
-            // парсим JSON ответ
-            // parse JSON response
             String responseBody = body.string();
             return gson.fromJson(responseBody, clazz);
         }
+    }
+
+    private Response call(Request request) throws IOException {
+        IOException last = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            Response response = httpClient.newCall(request).execute();
+            if (response.code() == 429 && attempt < 3) {
+                response.close();
+                try {
+                    Thread.sleep(1000L * (attempt + 1));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("Interrupted while waiting after rate limit", interrupted);
+                }
+                continue;
+            }
+            if (!response.isSuccessful()) {
+                String details = "";
+                ResponseBody errorBody = response.body();
+                if (errorBody != null) {
+                    details = errorBody.string();
+                }
+                response.close();
+                last = new IOException("Unexpected response code: " + response.code() + " " + details);
+                break;
+            }
+            return response;
+        }
+        throw last;
     }
     
     /**
@@ -349,6 +355,11 @@ public class TonApiClient {
         Request request = createRequest(url, "POST", 
             RequestBody.create(requestBody.toString(), MediaType.get("application/json")));
         return executeRequest(request, BlockHeader.class);
+    }
+
+    public JsonObject getMasterchainInfo() throws IOException {
+        Request request = createRequest(baseUrl + "getMasterchainInfo", "GET", null);
+        return executeRequest(request);
     }
     
     /**
