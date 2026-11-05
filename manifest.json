@@ -1,0 +1,21 @@
+{
+  "name": "CTON-SDK - TON Blockchain SDK",
+  "short_name": "CTON-SDK",
+  "description": "High-performance SDK with C++ core and Java bindings for TON Blockchain",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#4fc3f7",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "logo-simple.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

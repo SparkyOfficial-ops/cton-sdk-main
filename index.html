@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CTON-SDK - TON Blockchain SDK</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="logo.svg" onerror="this.src='logo-simple.svg'" alt="CTON-SDK Logo" class="logo-img">
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="#features">Features</a></li>
+                    <li><a href="#examples">Examples</a></li>
+                    <li><a href="#download">Download</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <div class="container">
+                <h1>TON Blockchain SDK</h1>
+                <p class="subtitle">High-performance SDK with C++ core and Java bindings</p>
+                <div class="cta-buttons">
+                    <a href="#download" class="btn primary">Get Started</a>
+                    <a href="https://github.com/SparkyOfficial/cton-sdk" class="btn secondary">GitHub</a>
+                </div>
+            </div>
+        </section>
+
+        <section id="features" class="features">
+            <div class="container">
+                <h2>Core Features</h2>
+                <div class="feature-grid">
+                    <div class="feature-card">
+                        <h3>Performance</h3>
+                        <p>C++ core with minimal memory allocations</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>Type Safety</h3>
+                        <p>Modern Java API with Builder patterns</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>Cryptography</h3>
+                        <p>Ed25519, secp256k1, BIP-39 mnemonics</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>TON Compatible</h3>
+                        <p>Full support for Cells, BOC, Addresses</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="examples" class="examples">
+            <div class="container">
+                <h2>Code Examples</h2>
+                <div class="example-tabs">
+                    <button class="tab-button active" data-tab="crypto">Crypto</button>
+                    <button class="tab-button" data-tab="wallet">Wallet</button>
+                    <button class="tab-button" data-tab="jetton">Jetton</button>
+                    <button class="tab-button" data-tab="nft">NFT</button>
+                </div>
+                <div class="tab-content">
+                    <div id="crypto" class="tab-pane active">
+                        <pre><code class="language-java">// Generate a new private key
+PrivateKey privateKey = PrivateKey.generate();
+
+// Get the corresponding public key
+PublicKey publicKey = privateKey.getPublicKey();
+
+// Create a message to sign
+String messageStr = "Hello, TON!";
+byte[] message = messageStr.getBytes();
+
+// Sign the message
+byte[] signature = Crypto.sign(privateKey, message);
+
+// Verify the signature
+boolean isValid = Crypto.verify(publicKey, message, signature);
+System.out.println("Signature valid: " + isValid);</code></pre>
+                        <button class="copy-button" data-clipboard-target="#crypto">Copy</button>
+                    </div>
+                    <div id="wallet" class="tab-pane">
+                        <pre><code class="language-java">// Create a wallet
+Wallet wallet = new WalletV3(walletAddress, apiClient);
+
+// Get wallet balance
+BigInteger balance = wallet.getBalance();
+
+// Create a transfer
+Address recipient = new Address("EQA8cLh74oFKcL523Jz9Hw5ReXY6Yglz8g422w7NwzvzL03V");
+BigInteger amount = BigInteger.valueOf(1_000_000_000L); // 1 TON
+Cell transfer = wallet.createTransfer(recipient, amount, "Test transfer");</code></pre>
+                        <button class="copy-button" data-clipboard-target="#wallet">Copy</button>
+                    </div>
+                    <div id="jetton" class="tab-pane">
+                        <pre><code class="language-java">// Create a Jetton instance
+Jetton jetton = new Jetton(jettonAddress, apiClient);
+
+// Get token information
+BigInteger totalSupply = jetton.getTotalSupply();
+Address minter = jetton.getJettonMinter();
+
+// Get user balance
+Address owner = new Address("EQA8cLh74oFKcL523Jz9Hw5ReXY6Yglz8g422w7NwzvzL03V");
+BigInteger balance = jetton.getBalance(owner);</code></pre>
+                        <button class="copy-button" data-clipboard-target="#jetton">Copy</button>
+                    </div>
+                    <div id="nft" class="tab-pane">
+                        <pre><code class="language-java">// Create an NFT instance
+Nft nft = new Nft(nftAddress, apiClient);
+
+// Get NFT information
+long index = nft.getIndex();
+Address collection = nft.getCollection();
+Address owner = nft.getOwner();</code></pre>
+                        <button class="copy-button" data-clipboard-target="#nft">Copy</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="download" class="download">
+            <div class="container">
+                <h2>Download</h2>
+                <div class="download-options">
+                    <div class="download-card">
+                        <h3>Java SDK</h3>
+                        <p>Maven dependency for Java projects</p>
+                        <div class="code-container">
+                            <pre><code class="language-xml">&lt;dependency&gt;
+    &lt;groupId&gt;com.cton&lt;/groupId&gt;
+    &lt;artifactId&gt;cton-sdk&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;
+&lt;/dependency&gt;</code></pre>
+                            <button class="copy-button" data-clipboard-text="&lt;dependency&gt;
+    &lt;groupId&gt;com.cton&lt;/groupId&gt;
+    &lt;artifactId&gt;cton-sdk&lt;/artifactId&gt;
+    &lt;version&gt;0.1.0-SNAPSHOT&lt;/version&gt;
+&lt;/dependency&gt;">Copy</button>
+                        </div>
+                        <a href="#" class="btn download-btn">Download JAR</a>
+                    </div>
+                    <div class="download-card">
+                        <h3>Native Library</h3>
+                        <p>C++ core library with JNA bindings</p>
+                        <ul>
+                            <li>Windows: cton-sdk-core.dll</li>
+                            <li>Linux: libcton-sdk-core.so</li>
+                            <li>macOS: libcton-sdk-core.dylib</li>
+                        </ul>
+                        <a href="#" class="btn download-btn">Download</a>
+                    </div>
+                    <div class="download-card">
+                        <h3>Source Code</h3>
+                        <p>Complete source code with examples</p>
+                        <div class="code-container">
+                            <pre><code class="language-bash">git clone https://github.com/SparkyOfficial/cton-sdk.git</code></pre>
+                            <button class="copy-button" data-clipboard-text="git clone https://github.com/SparkyOfficial/cton-sdk.git">Copy</button>
+                        </div>
+                        <a href="https://github.com/SparkyOfficial/cton-sdk" class="btn download-btn">Clone</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="logo.svg" onerror="this.src='logo-simple.svg'" alt="CTON-SDK Logo" class="logo-img footer-logo-img">
+                </div>
+                <div class="footer-links">
+                    <a href="https://github.com/SparkyOfficial/cton-sdk">GitHub</a>
+                    <a href="#">License</a>
+                </div>
+                <div class="footer-info">
+                    <p>&copy; 2025 CTON-SDK. Created by Sparky</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

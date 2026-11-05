@@ -1,0 +1,17 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Blue hexagon shape -->
+  <polygon points="100,10 173.2,55 173.2,145 100,190 26.8,145 26.8,55" 
+           fill="#4fc3f7" stroke="#1e88e5" stroke-width="2"/>
+  
+  <!-- CTON text -->
+  <text x="100" y="95" font-family="Arial, sans-serif" font-size="40" 
+        font-weight="bold" fill="white" text-anchor="middle" letter-spacing="-1">
+    CTON
+  </text>
+  
+  <!-- SDK text -->
+  <text x="100" y="130" font-family="Arial, sans-serif" font-size="20" 
+        font-weight="500" fill="white" text-anchor="middle" opacity="0.9">
+    SDK
+  </text>
+</svg>
