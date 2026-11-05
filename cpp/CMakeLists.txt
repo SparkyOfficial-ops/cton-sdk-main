@@ -97,6 +97,11 @@ if(OPENSSL_FOUND)
     message(STATUS "Using OpenSSL libraries: ${OpenSSL_LIBRARIES}")
     message(STATUS "Using OpenSSL version: ${OPENSSL_VERSION}")
     message(STATUS "Using OpenSSL include dirs: ${OpenSSL_INCLUDE_DIRS}")
+
+    # Static OpenSSL on Windows pulls in Winsock and the certificate store.
+    if(WIN32)
+        target_link_libraries(cton-sdk-core PRIVATE ws2_32 crypt32)
+    endif()
 else()
     message(FATAL_ERROR "OpenSSL libraries not found. OpenSSL is required for cryptographic operations.")
 endif()
